@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The trace receiver is a small web endpoint inside the test process. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Testing" Version="13.5.3" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />
+    <PackageReference Include="MSTest.Analyzers" Version="4.4.1" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
