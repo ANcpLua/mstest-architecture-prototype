@@ -25,11 +25,11 @@ internal sealed class TraceReceiver : IAsyncDisposable
     public static async Task<TraceReceiver> StartAsync(Action<Span> record)
     {
         var builder = WebApplication.CreateSlimBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        _ = builder.Logging.ClearProviders();
+        _ = builder.WebHost.UseUrls("http://127.0.0.1:0");
 
         var app = builder.Build();
-        app.MapPost("/v1/traces", async (HttpRequest request) =>
+        _ = app.MapPost("/v1/traces", async (HttpRequest request) =>
         {
             using var body = new MemoryStream();
             await request.Body.CopyToAsync(body).ConfigureAwait(false);
@@ -42,13 +42,16 @@ internal sealed class TraceReceiver : IAsyncDisposable
         });
 
         // Metrics and logs are accepted and dropped, so the services do not log failed exports.
-        app.MapPost("/v1/{signal}", (string signal) => Results.Bytes([], "application/x-protobuf"));
+        _ = app.MapPost("/v1/metrics", AcceptExport);
+        _ = app.MapPost("/v1/logs", AcceptExport);
 
         await app.StartAsync().ConfigureAwait(false);
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault()
             ?? throw new InvalidOperationException("The trace receiver has no address.");
 
         return new TraceReceiver(app, new Uri(address));
+
+        static IResult AcceptExport() => Results.Bytes([], "application/x-protobuf");
     }
 
     /// <inheritdoc />

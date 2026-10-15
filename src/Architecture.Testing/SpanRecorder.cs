@@ -14,37 +14,37 @@ internal static class SpanRecorder
     private static readonly ConcurrentDictionary<string, ConcurrentQueue<Span>> Traces = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, int> SpansPerSource = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim Gate = new(1, 1);
-    private static ActivityListener? listener;
-    private static TraceReceiver? receiver;
+    private static ActivityListener? _listener;
+    private static TraceReceiver? _receiver;
 
     /// <summary>How many spans each source produced in this process, inside a test or not.</summary>
     public static IReadOnlyDictionary<string, int> Sources => SpansPerSource;
 
     /// <summary>The address the services export their spans to.</summary>
     public static Uri ReceiverAddress =>
-        receiver?.Address ?? throw new InvalidOperationException("The trace receiver is not running.");
+        _receiver?.Address ?? throw new InvalidOperationException("The trace receiver is not running.");
 
     public static async Task StartAsync()
     {
         await Gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (listener is null)
+            if (_listener is null)
             {
-                listener = new ActivityListener
+                _listener = new ActivityListener
                 {
                     ShouldListenTo = _ => true,
-                    Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                    Sample = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
                     ActivityStopped = Record,
                 };
-                ActivitySource.AddActivityListener(listener);
+                ActivitySource.AddActivityListener(_listener);
             }
 
-            receiver ??= await TraceReceiver.StartAsync(Record).ConfigureAwait(false);
+            _receiver ??= await TraceReceiver.StartAsync(Record).ConfigureAwait(false);
         }
         finally
         {
-            Gate.Release();
+            _ = Gate.Release();
         }
     }
 
@@ -53,18 +53,18 @@ internal static class SpanRecorder
         await Gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (receiver is not null)
+            if (_receiver is not null)
             {
-                await receiver.DisposeAsync().ConfigureAwait(false);
-                receiver = null;
+                await _receiver.DisposeAsync().ConfigureAwait(false);
+                _receiver = null;
             }
 
-            listener?.Dispose();
-            listener = null;
+            _listener?.Dispose();
+            _listener = null;
         }
         finally
         {
-            Gate.Release();
+            _ = Gate.Release();
         }
     }
 
@@ -82,12 +82,12 @@ internal static class SpanRecorder
     public static void End(Activity root)
     {
         root.Stop();
-        Traces.TryRemove(root.TraceId.ToHexString(), out _);
+        _ = Traces.TryRemove(root.TraceId.ToHexString(), out _);
     }
 
-    public static void Record(Span span)
+    private static void Record(Span span)
     {
-        SpansPerSource.AddOrUpdate(span.Source, 1, (_, count) => count + 1);
+        _ = SpansPerSource.AddOrUpdate(span.Source, 1, (_, count) => count + 1);
         if (Traces.TryGetValue(span.TraceId, out var spans))
         {
             spans.Enqueue(span);
@@ -131,19 +131,19 @@ internal sealed class TestScope : IDisposable
 
     public RunningSystem Running { get; }
 
-    public string TraceId { get; }
+    private string TraceId { get; }
 
-    public IReadOnlyList<Span> Spans => SpanRecorder.SpansOf(TraceId);
+    private IReadOnlyList<Span> Spans => SpanRecorder.SpansOf(TraceId);
 
     /// <summary>Waits until the services have exported what the test caused, then returns the whole trace.</summary>
-    public async Task<TestTrace> SettleAsync()
+    public async Task<TestTrace> SettleAsync(CancellationToken cancellationToken = default)
     {
         var started = Stopwatch.StartNew();
         var quietSince = Stopwatch.StartNew();
         var seen = Spans.Count;
         while (started.Elapsed < WaitAtMost && quietSince.Elapsed < QuietFor)
         {
-            await Task.Delay(100).ConfigureAwait(false);
+            await Task.Delay(100, cancellationToken).ConfigureAwait(false);
             var count = Spans.Count;
             if (count != seen)
             {

@@ -1,33 +1,38 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using System.Reflection;
 using Architecture.Testing;
 
 namespace Checkout.Tests;
 
+/// <summary>Checks service process isolation, startup failures and cleanup.</summary>
+/// <param name="testContext">The runner context that supplies cancellation for this test.</param>
 [TestClass]
-public sealed class HostingTests
+public sealed class HostingTests(TestContext testContext)
 {
+    /// <summary>Disposing the selected service stops its process and invalidates further clients.</summary>
     [TestMethod]
-    public async Task Selected_service_runs_in_its_own_process_and_disposal_stops_it()
+    public async Task SelectedServiceRunsInItsOwnProcessAndDisposalStopsIt()
     {
         var system = await RunningSystem.StartAsync(new MonolithAttribute(),
-            [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")]);
+            [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")], testContext.CancellationToken);
         Process? child = null;
         try
         {
             await using (system)
             {
                 using var client = system.Client<Payments.Api.EntryPoint>();
-                var processId = await client.GetFromJsonAsync<int>("/health");
+                var processId = await client.GetFromJsonAsync<int>("/health", testContext.CancellationToken);
                 child = Process.GetProcessById(processId);
 
                 Assert.AreNotEqual(Environment.ProcessId, processId);
-                CollectionAssert.AreEqual(new[] { "payments-api" }, system.Bricks.ToArray());
-                Assert.ThrowsExactly<ArchitectureException>(system.Client<Orders.Api.EntryPoint>);
+                Assert.HasCount(1, system.Bricks);
+                Assert.AreEqual("payments-api", system.Bricks[0]);
+                _ = Assert.ThrowsExactly<ArchitectureException>(system.Client<Orders.Api.EntryPoint>);
             }
 
             Assert.IsTrue(child.HasExited);
-            Assert.ThrowsExactly<ObjectDisposedException>(system.Client<Payments.Api.EntryPoint>);
+            _ = Assert.ThrowsExactly<ObjectDisposedException>(system.Client<Payments.Api.EntryPoint>);
         }
         finally
         {
@@ -35,16 +40,39 @@ public sealed class HostingTests
         }
     }
 
+    /// <summary>A missing service reference retains the child process's startup diagnostic.</summary>
     [TestMethod]
-    public async Task Missing_dependency_reports_the_child_startup_error()
+    public async Task MissingDependencyReportsTheChildStartupError()
     {
         var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(async () =>
         {
             await using var system = await RunningSystem.StartAsync(new MonolithAttribute(),
-                [new ServiceAttribute<Orders.Api.EntryPoint>("orders-api")]);
+                [new ServiceAttribute<Orders.Api.EntryPoint>("orders-api")], testContext.CancellationToken);
         });
 
-        StringAssert.Contains(failure.Message, "exited with code");
-        StringAssert.Contains(failure.Message, "No address for the payments service was configured.");
+        Assert.Contains("exited with code", failure.Message);
+        Assert.Contains("No address for the payments service was configured.", failure.Message);
+    }
+
+    /// <summary>A canceled launch request stops before starting a service.</summary>
+    [TestMethod]
+    public async Task CancelledStartupIsNotReportedAsAServiceFailure() =>
+        _ = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => RunningSystem.StartAsync(
+            new MonolithAttribute(), [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")],
+            new CancellationToken(canceled: true)));
+
+    /// <summary>The architecture wrapper preserves navigation to the original test source.</summary>
+    [TestMethod]
+    public void WrappedTestRetainsOriginalSourceLocation()
+    {
+        var original = typeof(HostingTests)
+            .GetMethod(nameof(SelectedServiceRunsInItsOwnProcessAndDisposalStopsIt))!
+            .GetCustomAttribute<TestMethodAttribute>()!;
+        var wrapped = new MonolithAttribute().GetTestMethodAttribute(original);
+
+        Assert.Contains("HostingTests.cs", original.DeclaringFilePath);
+        Assert.IsNotNull(original.DeclaringLineNumber);
+        Assert.AreEqual(original.DeclaringFilePath, wrapped.DeclaringFilePath);
+        Assert.AreEqual(original.DeclaringLineNumber, wrapped.DeclaringLineNumber);
     }
 }

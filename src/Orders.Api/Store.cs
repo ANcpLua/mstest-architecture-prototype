@@ -1,6 +1,8 @@
 using Qyl;
 using Qyl.Telemetry.SemanticConventions.Activities;
 
+namespace Orders.Api;
+
 /// <summary>The store this service writes to. Every write leaves a span, the way a database client would.</summary>
 internal sealed class Store(string name)
 {

@@ -1,3 +1,5 @@
+using JetBrains.Annotations;
+using Payments.Api;
 using Qyl;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,12 +22,14 @@ app.MapPost("/charge", (Charge charge) =>
 
 app.Run();
 
+[UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
 internal sealed record Charge(string OrderId, decimal Amount);
 
+[UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
 internal sealed record Receipt(string OrderId, decimal Amount, string Store);
 
 namespace Payments.Api
 {
     /// <summary>Identifies this executable to the architecture test fixture.</summary>
-    public sealed class EntryPoint;
+    public abstract class EntryPoint;
 }

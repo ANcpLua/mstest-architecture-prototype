@@ -1,3 +1,5 @@
+using JetBrains.Annotations;
+using Orders.Api;
 using Qyl;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,7 +26,7 @@ app.MapPost("/orders", async (PlaceOrder order, IHttpClientFactory clients) =>
     store.Write("order");
 
     var response = await clients.CreateClient("payments").PostAsJsonAsync("/charge", new Charge(id, order.Amount));
-    response.EnsureSuccessStatusCode();
+    _ = response.EnsureSuccessStatusCode();
     var receipt = await response.Content.ReadFromJsonAsync<Receipt>()
         ?? throw new InvalidOperationException("The payments service returned no receipt.");
 
@@ -33,16 +35,19 @@ app.MapPost("/orders", async (PlaceOrder order, IHttpClientFactory clients) =>
 
 app.Run();
 
+[UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
 internal sealed record PlaceOrder(decimal Amount);
 
+[UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
 internal sealed record Charge(string OrderId, decimal Amount);
 
 internal sealed record Receipt(string OrderId, decimal Amount, string Store);
 
+[UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
 internal sealed record Order(string Id, decimal Amount, string OrdersStore, string PaymentsStore);
 
 namespace Orders.Api
 {
     /// <summary>Identifies this executable to the architecture test fixture.</summary>
-    public sealed class EntryPoint;
+    public abstract class EntryPoint;
 }

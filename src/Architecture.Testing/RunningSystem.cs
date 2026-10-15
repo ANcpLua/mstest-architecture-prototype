@@ -16,7 +16,7 @@ public sealed class RunningSystem : IAsyncDisposable
     private RunningSystem(string kind, IReadOnlyList<BrickAttribute> services, QylApplication application)
     {
         Kind = kind;
-        Bricks = services.Select(service => service.Name).ToArray();
+        Bricks = [.. services.Select(service => service.Name)];
         _services = services;
         _application = application;
     }
@@ -27,11 +27,12 @@ public sealed class RunningSystem : IAsyncDisposable
     /// <summary>The names of the running bricks.</summary>
     public IReadOnlyList<string> Bricks { get; }
 
-    /// <summary>The spans the running test has caused so far, as far as they have arrived.</summary>
-    public IReadOnlyList<Span> Spans => CurrentTest.Spans;
-
     /// <summary>Waits until the services have exported what the test caused so far, then returns the trace.</summary>
-    public Task<TestTrace> TraceAsync() => CurrentTest.SettleAsync();
+    public Task<TestTrace> TraceAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return CurrentTest.SettleAsync(cancellationToken);
+    }
 
     internal static RunningSystem Current => CurrentTest.Running;
 
@@ -52,7 +53,9 @@ public sealed class RunningSystem : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
+        {
             return;
+        }
 
         _disposed = true;
         await _application.DisposeAsync().ConfigureAwait(false);
@@ -92,15 +95,25 @@ public sealed class RunningSystem : IAsyncDisposable
         return scope;
     }
 
-    internal static async Task<RunningSystem> StartAsync(ArchitectureAttribute architecture, IReadOnlyList<BrickAttribute> bricks)
+    internal static async Task<RunningSystem> StartAsync(ArchitectureAttribute architecture, IReadOnlyList<BrickAttribute> bricks,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (architecture.Check(bricks) is { } problem)
+        {
             throw new ArchitectureException(problem);
+        }
+
         if (bricks.Any(brick => string.IsNullOrWhiteSpace(brick.Name) || brick.Name.Contains(':', StringComparison.Ordinal)))
+        {
             throw new ArchitectureException("Every brick needs a nonempty service name without a colon.");
+        }
+
         if (bricks.Select(brick => brick.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != bricks.Count
             || bricks.Select(brick => brick.Part).Distinct().Count() != bricks.Count)
+        {
             throw new ArchitectureException("Each service name and service type must identify exactly one brick.");
+        }
 
         await SpanRecorder.StartAsync().ConfigureAwait(false);
         var builder = new QylApplicationBuilder
@@ -122,13 +135,17 @@ public sealed class RunningSystem : IAsyncDisposable
             .WithEnvironment("Logging__LogLevel__Default", "Warning")
             .WithHealthCheck(requireProcessId: true)).ToArray();
         foreach (var service in services)
+        {
             foreach (var reference in services.Where(reference => reference != service))
-                service.WithReference(reference);
+            {
+                _ = service.WithReference(reference);
+            }
+        }
 
         var application = builder.Build();
         try
         {
-            await application.StartAsync().ConfigureAwait(false);
+            await application.StartAsync(cancellationToken).ConfigureAwait(false);
             return new RunningSystem(architecture.Kind, bricks, application);
         }
         catch (InvalidOperationException exception)

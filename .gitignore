@@ -2,3 +2,5 @@
 **/obj/
 TestResults/
 artifacts/
+*.DotSettings.user
+.fallout/temp/

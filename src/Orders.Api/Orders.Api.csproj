@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
     <PackageReference Include="Qyl.Telemetry.Hosting" Version="$(QylTelemetryVersion)" />
   </ItemGroup>
 

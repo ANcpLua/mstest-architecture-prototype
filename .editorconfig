@@ -1,0 +1,36 @@
+[*.cs]
+# Keep the repository's existing C# conventions explicit for command-line analysis.
+csharp_style_var_for_built_in_types = true:warning
+csharp_style_var_when_type_is_apparent = true:warning
+csharp_style_var_elsewhere = true:warning
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_expression_bodied_methods = true:warning
+csharp_style_expression_bodied_local_functions = true:warning
+
+# Surface enabled analyzer suggestions in the build; warnings already fail it.
+dotnet_analyzer_diagnostic.severity = warning
+
+# MSTest 4.4.1 explicitly assigns suggestion severity to these rules.
+dotnet_diagnostic.MSTEST0001.severity = warning
+dotnet_diagnostic.MSTEST0016.severity = warning
+dotnet_diagnostic.MSTEST0023.severity = warning
+dotnet_diagnostic.MSTEST0037.severity = warning
+dotnet_diagnostic.MSTEST0045.severity = warning
+dotnet_diagnostic.MSTEST0046.severity = warning
+dotnet_diagnostic.MSTEST0049.severity = warning
+dotnet_diagnostic.MSTEST0051.severity = warning
+dotnet_diagnostic.MSTEST0054.severity = warning
+dotnet_diagnostic.MSTEST0058.severity = warning
+dotnet_diagnostic.MSTEST0061.severity = warning
+dotnet_diagnostic.MSTEST0064.severity = warning
+dotnet_diagnostic.MSTEST0066.severity = warning
+dotnet_diagnostic.MSTEST0068.severity = warning
+dotnet_diagnostic.MSTEST0071.severity = warning
+dotnet_diagnostic.MSTEST0073.severity = warning
+dotnet_diagnostic.MSTEST0074.severity = warning
+dotnet_diagnostic.MSTEST0075.severity = warning
+dotnet_diagnostic.MSTEST0076.severity = warning
+dotnet_diagnostic.MSTEST0077.severity = warning
+dotnet_diagnostic.MSTEST0079.severity = warning
+dotnet_diagnostic.MSTEST0080.severity = warning
+dotnet_diagnostic.MSTEST0083.severity = warning

@@ -92,6 +92,8 @@ internal static class OtlpTraces
                     var (key, value) = DecodeKeyValue(field.Bytes);
                     attributes[key] = value;
                     break;
+                default:
+                    continue;
             }
         }
 
@@ -112,6 +114,8 @@ internal static class OtlpTraces
                 case 2:
                     value = DecodeAnyValue(field.Bytes);
                     break;
+                default:
+                    continue;
             }
         }
 
@@ -134,6 +138,8 @@ internal static class OtlpTraces
                     return BitConverter.Int64BitsToDouble((long)field.Value).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 case 7:
                     return Convert.ToHexStringLower(field.Bytes.Span);
+                default:
+                    continue;
             }
         }
 

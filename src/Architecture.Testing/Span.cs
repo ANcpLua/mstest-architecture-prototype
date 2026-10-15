@@ -25,13 +25,13 @@ public sealed record Span(
     public const string TestProcess = "test";
 
     /// <summary>The address a client span called, when it has one.</summary>
-    public string? Target => Attribute("url.full") ?? Attribute("http.url");
+    private string? Target => Attribute("url.full") ?? Attribute("http.url");
 
     /// <summary>The store a span touched, when it touched one.</summary>
     public string? Store => Attribute("db.namespace") ?? Attribute("db.name");
 
     /// <summary>The value of one attribute, or null when the span does not have it.</summary>
-    public string? Attribute(string key) => Attributes.TryGetValue(key, out var value) ? value : null;
+    public string? Attribute(string key) => Attributes.GetValueOrDefault(key);
 
     /// <inheritdoc />
     public override string ToString()

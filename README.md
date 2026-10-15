@@ -15,7 +15,19 @@ public sealed class CheckoutTests
 }
 ```
 
-Run with the .NET SDK pinned in `global.json`:
+Run the tests and inspections with the .NET SDK pinned in `global.json`:
+
+```sh
+./build.sh
+```
+
+The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, runs all
+eight tests, and runs InspectCode against their build outputs. It fails on inspection
+warnings, errors or suggestions; the report is `artifacts/jb-inspections.xml`.
+`.editorconfig` promotes enabled analyzer suggestions, including MSTest's cancellation
+guidance, to build warnings, which the project treats as errors.
+
+To run just the tests:
 
 ```sh
 dotnet test --project tests/Checkout.Tests/Checkout.Tests.csproj --report-trx --results-directory TestResults
@@ -45,4 +57,5 @@ uses its published NuGet package. No sibling clone or copied orchestration sourc
 
 The checkout tests cover microservices, a distributed monolith and a single-service monolith,
 including the exported qyl store spans and the orders-to-payments call. Hosting tests cover
-process isolation, service selection, shutdown and a missing dependency's startup error.
+process isolation, service selection, shutdown, startup cancellation, a missing dependency's
+startup error, and preservation of the wrapped test's source location.

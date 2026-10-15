@@ -1,4 +1,4 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Architecture.Testing;
 
@@ -14,15 +14,14 @@ public abstract class ArchitectureAttribute : TestClassAttribute
     public string Kind => GetType().Name[..^nameof(Attribute).Length];
 
     /// <inheritdoc />
-    public sealed override TestMethodAttribute? GetTestMethodAttribute(TestMethodAttribute testMethodAttribute)
+    [SuppressMessage("ReSharper", "ExplicitCallerInfoArgument",
+        Justification = "The wrapper must retain the original test's source location, rather than this factory's call site.")]
+    public sealed override TestMethodAttribute GetTestMethodAttribute(TestMethodAttribute testMethodAttribute)
     {
         ArgumentNullException.ThrowIfNull(testMethodAttribute);
 
-        return new ArchitectureTestMethodAttribute(
-            this,
-            testMethodAttribute,
-            testMethodAttribute.DeclaringFilePath,
-            testMethodAttribute.DeclaringLineNumber ?? -1);
+        return new ArchitectureTestMethodAttribute(this, testMethodAttribute,
+            testMethodAttribute.DeclaringFilePath, testMethodAttribute.DeclaringLineNumber ?? -1);
     }
 
     /// <summary>Says what is wrong with this set of bricks for this architecture, or nothing when it fits.</summary>
