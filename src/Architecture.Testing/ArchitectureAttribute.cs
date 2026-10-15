@@ -29,7 +29,7 @@ public abstract class ArchitectureAttribute : TestClassAttribute
     protected internal abstract string? Check(IReadOnlyList<BrickAttribute> bricks);
 
     /// <summary>The store a brick writes to. This is where the architectures differ.</summary>
-    /// <param name="brick">The name the host gave the brick.</param>
+    /// <param name="brick">The service name declared by the brick.</param>
     protected internal abstract string StoreOf(string brick);
 
     /// <summary>

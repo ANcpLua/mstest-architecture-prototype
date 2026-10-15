@@ -17,7 +17,7 @@ internal sealed class ArchitectureTestMethodAttribute(
         var testClass = testMethod.MethodInfo.ReflectedType
             ?? throw new InvalidOperationException($"{testMethod.TestMethodName} has no test class.");
         var bricks = testClass.GetCustomAttributes<BrickAttribute>(inherit: false)
-            .OrderBy(brick => brick.Part.Name, StringComparer.Ordinal)
+            .OrderBy(brick => brick.Name, StringComparer.Ordinal)
             .ToList();
 
         if (architecture.Check(bricks) is { } problem)
@@ -51,5 +51,5 @@ internal sealed class ArchitectureTestMethodAttribute(
     }
 }
 
-/// <summary>The stacked bricks do not fit the architecture the test class claims, or the host does not know them.</summary>
+/// <summary>The stacked bricks do not fit the architecture the test class claims, or a service cannot start.</summary>
 public sealed class ArchitectureException(string message) : Exception(message);

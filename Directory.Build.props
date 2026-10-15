@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <QylTelemetryVersion>25.0.2</QylTelemetryVersion>
   </PropertyGroup>
 
 </Project>

@@ -10,9 +10,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.Testing" Version="13.5.3" />
     <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />
     <PackageReference Include="MSTest.Analyzers" Version="4.4.1" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Checkout.Tests" />
   </ItemGroup>
 
 </Project>

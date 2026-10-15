@@ -1,21 +1,16 @@
-using OpenTelemetry;
-using OpenTelemetry.Trace;
+using Qyl;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Every span goes to wherever the host points this service, the way a service with Aspire's defaults does.
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracing => tracing
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddSource(Store.Source.Name))
-    .UseOtlpExporter();
+// qyl records HTTP and application spans and exports to the configured OTLP endpoint.
+builder.AddQyl();
 
 var app = builder.Build();
 
 // The store this service writes to. The architecture attribute decides whether it is shared.
 var store = new Store(app.Configuration["STORE"] ?? "none");
 
+app.MapGet("/health", () => Environment.ProcessId);
 app.MapGet("/store", () => store.Name);
 app.MapPost("/charge", (Charge charge) =>
 {
@@ -28,3 +23,9 @@ app.Run();
 internal sealed record Charge(string OrderId, decimal Amount);
 
 internal sealed record Receipt(string OrderId, decimal Amount, string Store);
+
+namespace Payments.Api
+{
+    /// <summary>Identifies this executable to the architecture test fixture.</summary>
+    public sealed class EntryPoint;
+}

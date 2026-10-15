@@ -1,31 +1,27 @@
 using System.Collections.Concurrent;
-using Aspire.Hosting;
-using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.Testing;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Architecture.Testing;
 
-/// <summary>The system a test class runs against: its bricks, started by their host and coupled by the architecture attribute.</summary>
+/// <summary>The system a test class runs against: separate service processes coupled by the architecture attribute.</summary>
 public sealed class RunningSystem : IAsyncDisposable
 {
     private static readonly TimeSpan StartTimeout = TimeSpan.FromMinutes(2);
     private static readonly ConcurrentDictionary<Type, Lazy<Task<RunningSystem>>> Systems = new();
     private static readonly AsyncLocal<TestScope?> Test = new();
+    private readonly IReadOnlyList<ServiceProcess> _services;
+    private bool _disposed;
 
-    private readonly DistributedApplication _application;
-
-    private RunningSystem(string kind, IReadOnlyList<string> bricks, DistributedApplication application)
+    private RunningSystem(string kind, IReadOnlyList<ServiceProcess> services)
     {
         Kind = kind;
-        Bricks = bricks;
-        _application = application;
+        Bricks = services.Select(service => service.Name).ToArray();
+        _services = services;
     }
 
     /// <summary>The architecture the test class claims.</summary>
     public string Kind { get; }
 
-    /// <summary>The names the host gave the running bricks.</summary>
+    /// <summary>The names of the running bricks.</summary>
     public IReadOnlyList<string> Bricks { get; }
 
     /// <summary>The spans the running test has caused so far, as far as they have arrived.</summary>
@@ -40,19 +36,24 @@ public sealed class RunningSystem : IAsyncDisposable
         Test.Value ?? throw new InvalidOperationException("No test of a class with an architecture attribute is running.");
 
     /// <summary>A client that talks to one brick.</summary>
-    /// <typeparam name="TProject">The project the brick was stacked with.</typeparam>
-    public HttpClient Client<TProject>()
-        where TProject : IProjectMetadata, new()
+    /// <typeparam name="TService">The service type the brick was stacked with.</typeparam>
+    public HttpClient Client<TService>()
     {
-        var model = _application.Services.GetRequiredService<DistributedApplicationModel>();
-        var brick = Brick.Find<TProject>(model.Resources)
-            ?? throw new ArchitectureException($"{typeof(TProject).Name} is not a brick of this test class.");
-
-        return _application.CreateHttpClient(brick.Name);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var service = _services.SingleOrDefault(service => service.Part == typeof(TService))
+            ?? throw new ArchitectureException($"{typeof(TService).FullName} is not a brick of this test class.");
+        return new HttpClient { BaseAddress = service.Address };
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync() => await _application.DisposeAsync().ConfigureAwait(false);
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        await Task.WhenAll(_services.Select(service => service.DisposeAsync().AsTask())).ConfigureAwait(false);
+    }
 
     internal static Task<RunningSystem> GetOrStartAsync(
         Type testClass,
@@ -62,12 +63,23 @@ public sealed class RunningSystem : IAsyncDisposable
 
     internal static async Task StopAllAsync()
     {
-        foreach (var system in Systems.Values.Where(system => system.IsValueCreated))
-        {
-            await (await system.Value.ConfigureAwait(false)).DisposeAsync().ConfigureAwait(false);
-        }
-
+        var systems = Systems.Values.Where(system => system.IsValueCreated).Select(system => system.Value).ToArray();
         Systems.Clear();
+        await Task.WhenAll(systems.Select(async pending =>
+        {
+            RunningSystem system;
+            try
+            {
+                system = await pending.ConfigureAwait(false);
+            }
+            catch
+            {
+                // StartAsync already disposed every process of a failed startup.
+                return;
+            }
+
+            await system.DisposeAsync().ConfigureAwait(false);
+        })).ConfigureAwait(false);
     }
 
     internal TestScope Enter(string testName)
@@ -77,50 +89,38 @@ public sealed class RunningSystem : IAsyncDisposable
         return scope;
     }
 
-    private static async Task<RunningSystem> StartAsync(ArchitectureAttribute architecture, IReadOnlyList<BrickAttribute> bricks)
+    internal static async Task<RunningSystem> StartAsync(ArchitectureAttribute architecture, IReadOnlyList<BrickAttribute> bricks)
     {
+        if (architecture.Check(bricks) is { } problem)
+            throw new ArchitectureException(problem);
+        if (bricks.Any(brick => string.IsNullOrWhiteSpace(brick.Name) || brick.Name.Contains(':', StringComparison.Ordinal)))
+            throw new ArchitectureException("Every brick needs a nonempty service name without a colon.");
+        if (bricks.Select(brick => brick.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != bricks.Count
+            || bricks.Select(brick => brick.Part).Distinct().Count() != bricks.Count)
+            throw new ArchitectureException("Each service name and service type must identify exactly one brick.");
+
         using var timeout = new CancellationTokenSource(StartTimeout);
         await SpanRecorder.StartAsync().ConfigureAwait(false);
-
-        // A brick is a type from the host's assembly, so the bricks themselves say which host puts the system together.
-        var builder = await DistributedApplicationTestingBuilder.CreateAsync(bricks[0].Part, timeout.Token).ConfigureAwait(false);
-
-        var chosen = bricks.Select(brick => brick.FindIn(builder)).ToList();
-        foreach (var brick in chosen)
-        {
-            builder.CreateResourceBuilder(brick)
-                .WithEnvironment("STORE", architecture.StoreOf(brick.Name))
-                // Every brick exports its spans to the receiver in the test process, promptly.
-                .WithEnvironment("OTEL_SERVICE_NAME", brick.Name)
-                .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", SpanRecorder.ReceiverAddress.ToString())
-                .WithEnvironment("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
-                .WithEnvironment("OTEL_BSP_SCHEDULE_DELAY", "200");
-        }
-
-        // Only the stacked bricks run. What the host would start beyond them is left out.
-        foreach (var other in builder.Resources.OfType<ProjectResource>().Where(project => !chosen.Contains(project)).ToList())
-        {
-            builder.Resources.Remove(other);
-        }
-
-        var application = await builder.BuildAsync(timeout.Token).ConfigureAwait(false);
+        var services = new List<ServiceProcess>();
         try
         {
-            await application.StartAsync(timeout.Token).ConfigureAwait(false);
-            foreach (var brick in chosen)
-            {
-                await application.ResourceNotifications
-                    .WaitForResourceAsync(brick.Name, KnownResourceStates.Running, timeout.Token)
-                    .ConfigureAwait(false);
-            }
+            // Reserve every endpoint before starting children, so all service addresses are known.
+            foreach (var brick in bricks)
+                services.Add(new ServiceProcess(brick));
+
+            var addresses = services.ToDictionary(service => service.Name, service => service.Address, StringComparer.Ordinal);
+            foreach (var service in services)
+                service.Start(architecture.StoreOf(service.Name), addresses, SpanRecorder.ReceiverAddress);
+            foreach (var service in services)
+                await service.WaitForReadyAsync(timeout.Token).ConfigureAwait(false);
+
+            return new RunningSystem(architecture.Kind, services);
         }
         catch
         {
-            await application.DisposeAsync().ConfigureAwait(false);
+            await Task.WhenAll(services.Select(service => service.DisposeAsync().AsTask())).ConfigureAwait(false);
             throw;
         }
-
-        return new RunningSystem(architecture.Kind, [.. chosen.Select(brick => brick.Name)], application);
     }
 }
 

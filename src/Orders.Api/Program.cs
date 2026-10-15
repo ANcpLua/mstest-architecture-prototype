@@ -1,26 +1,22 @@
-using OpenTelemetry;
-using OpenTelemetry.Trace;
+using Qyl;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Every span goes to wherever the host points this service, the way a service with Aspire's defaults does.
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracing => tracing
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddSource(Store.Source.Name))
-    .UseOtlpExporter();
+// qyl records HTTP and application spans and exports to the configured OTLP endpoint.
+builder.AddQyl();
 
 // The address of the payments service is handed in by the host that starts this service.
+var paymentsAddress = new Uri(builder.Configuration["services:payments-api:http:0"]
+    ?? throw new InvalidOperationException("No address for the payments service was configured."));
 builder.Services.AddHttpClient("payments", client =>
-    client.BaseAddress = new Uri(builder.Configuration["services:payments-api:http:0"]
-        ?? throw new InvalidOperationException("No address for the payments service was configured.")));
+    client.BaseAddress = paymentsAddress);
 
 var app = builder.Build();
 
 // The store this service writes to. The architecture attribute decides whether it is shared.
 var store = new Store(app.Configuration["STORE"] ?? "none");
 
+app.MapGet("/health", () => Environment.ProcessId);
 app.MapGet("/store", () => store.Name);
 app.MapPost("/orders", async (PlaceOrder order, IHttpClientFactory clients) =>
 {
@@ -44,3 +40,9 @@ internal sealed record Charge(string OrderId, decimal Amount);
 internal sealed record Receipt(string OrderId, decimal Amount, string Store);
 
 internal sealed record Order(string Id, decimal Amount, string OrdersStore, string PaymentsStore);
+
+namespace Orders.Api
+{
+    /// <summary>Identifies this executable to the architecture test fixture.</summary>
+    public sealed class EntryPoint;
+}

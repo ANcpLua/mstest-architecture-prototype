@@ -4,8 +4,7 @@
     "rollForward": "disable"
   },
   "msbuild-sdks": {
-    "MSTest.Sdk": "4.4.1",
-    "Aspire.AppHost.Sdk": "13.5.3"
+    "MSTest.Sdk": "4.4.1"
   },
   "test": {
     "runner": "Microsoft.Testing.Platform"

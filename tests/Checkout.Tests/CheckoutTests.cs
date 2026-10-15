@@ -1,12 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using Architecture.Testing;
+using Qyl.Telemetry.SemanticConventions.Names;
+using OrdersApi = Orders.Api.EntryPoint;
+using PaymentsApi = Payments.Api.EntryPoint;
 
 namespace Checkout.Tests;
 
 [Microservices]
-[Service<Projects.Orders_Api>]
-[Service<Projects.Payments_Api>]
+[Service<OrdersApi>("orders-api")]
+[Service<PaymentsApi>("payments-api")]
 public sealed class CheckoutAsMicroservices
 {
     [TestMethod]
@@ -26,14 +29,18 @@ public sealed class CheckoutAsMicroservices
         var trace = await SystemUnderTest.Current.TraceAsync();
 
         Assert.Contains(new Call("orders-api", "payments-api"), trace.Calls);
+        var writes = trace.Spans.Where(span => span.Store is not null).ToArray();
+        Assert.HasCount(2, writes);
+        Assert.IsTrue(writes.All(span => span.Source == QylTelemetryNames.Scopes.QylTelemetryApplication));
+        Assert.IsTrue(writes.All(span => span.Attribute("qyl.instrumentation.domain") == "db.client"));
         Assert.AreEqual("orders-api", trace.StoresOf("orders-api").Single());
         Assert.AreEqual("payments-api", trace.StoresOf("payments-api").Single());
     }
 }
 
 [DistributedMonolith]
-[Service<Projects.Orders_Api>]
-[Service<Projects.Payments_Api>]
+[Service<OrdersApi>("orders-api")]
+[Service<PaymentsApi>("payments-api")]
 public sealed class CheckoutAsDistributedMonolith
 {
     [TestMethod]
@@ -50,13 +57,13 @@ public sealed class CheckoutAsDistributedMonolith
 }
 
 [Monolith]
-[Service<Projects.Payments_Api>]
+[Service<PaymentsApi>("payments-api")]
 public sealed class PaymentsAsMonolith
 {
     [TestMethod]
     public async Task Charge_is_written_to_the_store_of_the_one_deployable()
     {
-        using var payments = SystemUnderTest.Current.Client<Projects.Payments_Api>();
+        using var payments = SystemUnderTest.Current.Client<PaymentsApi>();
 
         var response = await payments.PostAsJsonAsync("/charge", new { OrderId = "1", Amount = 12.5m });
         var receipt = await response.Content.ReadFromJsonAsync<Receipt>();
@@ -70,7 +77,7 @@ internal static class Checkout
 {
     public static async Task<Order> PlaceOrderAsync()
     {
-        using var orders = SystemUnderTest.Current.Client<Projects.Orders_Api>();
+        using var orders = SystemUnderTest.Current.Client<OrdersApi>();
 
         var response = await orders.PostAsJsonAsync("/orders", new { Amount = 12.5m });
 
