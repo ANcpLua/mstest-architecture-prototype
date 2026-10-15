@@ -68,19 +68,20 @@ them or suppress a caller-information inspection.
 
 ## Coverage
 
-Use DotCov 4.5.0 or later. `coverage.config` measures Architecture.Testing, Orders.Api
-and Payments.Api, including their child processes. These are the same settings used
-for the coverage investigation. The repository has no coverage threshold policy.
+Use DotCov 4.7.0 or later. `dotcov test` flushes pending Microsoft coverage counters
+when the expected startup-error child terminates. `coverage.config` measures all three
+source assemblies, including their child processes. The repository has no coverage
+threshold policy, so `--min-line 0` leaves the gate disabled (exit 4).
 
 ```sh
-coverage_run_dir="artifacts/coverage/$(date +%Y%m%d-%H%M%S)"
-dotnet test --project tests/Checkout.Tests/Checkout.Tests.csproj -c Release \
-  --minimum-expected-tests 8 --report-trx --results-directory "$coverage_run_dir" \
-  --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml \
-  --coverage-settings coverage.config
-dotcov report "$coverage_run_dir/coverage.cobertura.xml" --format json --top 100
+mkdir -p artifacts
+dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 0 --format json -- \
+  -c Release --minimum-expected-tests 8 --report-trx \
+  --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
+  > artifacts/coverage.json
 ```
 
-Keep the Cobertura report, test results and DotCov diagnostics. All three assemblies
-and all 14 tracked C# source files should appear. Uncovered lines and partial branches
-identify behavior the tests have not exercised.
+DotCov writes each run's XML, test results and log into a fresh `TestResults/<run>`
+directory, named on stderr. Keep these with the JSON and diagnostics. All three
+assemblies and all 14 tracked C# source files should appear. Uncovered lines and
+partial branches identify behavior the tests have not exercised.
