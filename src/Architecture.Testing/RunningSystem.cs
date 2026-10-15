@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Qyl.Orchestration;
 
 namespace Architecture.Testing;
 
@@ -8,14 +9,16 @@ public sealed class RunningSystem : IAsyncDisposable
     private static readonly TimeSpan StartTimeout = TimeSpan.FromMinutes(2);
     private static readonly ConcurrentDictionary<Type, Lazy<Task<RunningSystem>>> Systems = new();
     private static readonly AsyncLocal<TestScope?> Test = new();
-    private readonly IReadOnlyList<ServiceProcess> _services;
+    private readonly IReadOnlyList<BrickAttribute> _services;
+    private readonly QylApplication _application;
     private bool _disposed;
 
-    private RunningSystem(string kind, IReadOnlyList<ServiceProcess> services)
+    private RunningSystem(string kind, IReadOnlyList<BrickAttribute> services, QylApplication application)
     {
         Kind = kind;
         Bricks = services.Select(service => service.Name).ToArray();
         _services = services;
+        _application = application;
     }
 
     /// <summary>The architecture the test class claims.</summary>
@@ -42,7 +45,7 @@ public sealed class RunningSystem : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         var service = _services.SingleOrDefault(service => service.Part == typeof(TService))
             ?? throw new ArchitectureException($"{typeof(TService).FullName} is not a brick of this test class.");
-        return new HttpClient { BaseAddress = service.Address };
+        return new HttpClient { BaseAddress = _application.GetEndpoint(service.Name) };
     }
 
     /// <inheritdoc />
@@ -52,7 +55,7 @@ public sealed class RunningSystem : IAsyncDisposable
             return;
 
         _disposed = true;
-        await Task.WhenAll(_services.Select(service => service.DisposeAsync().AsTask())).ConfigureAwait(false);
+        await _application.DisposeAsync().ConfigureAwait(false);
     }
 
     internal static Task<RunningSystem> GetOrStartAsync(
@@ -99,26 +102,43 @@ public sealed class RunningSystem : IAsyncDisposable
             || bricks.Select(brick => brick.Part).Distinct().Count() != bricks.Count)
             throw new ArchitectureException("Each service name and service type must identify exactly one brick.");
 
-        using var timeout = new CancellationTokenSource(StartTimeout);
         await SpanRecorder.StartAsync().ConfigureAwait(false);
-        var services = new List<ServiceProcess>();
+        var builder = new QylApplicationBuilder
+        {
+            StartupTimeoutSeconds = (int)StartTimeout.TotalSeconds,
+            MaxRestarts = 0
+        };
+        var services = bricks.Select(brick => builder.AddDotnetService(brick.Name, brick.Part.Assembly.Location)
+            .WithoutEnvironmentPrefix("OTEL_")
+            .WithoutEnvironmentPrefix("QYL_")
+            .WithoutEnvironmentPrefix("services__")
+            .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+            .WithEnvironment("STORE", architecture.StoreOf(brick.Name))
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", SpanRecorder.ReceiverAddress.ToString())
+            .WithEnvironment("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+            .WithEnvironment("OTEL_TRACES_SAMPLER", "always_on")
+            .WithEnvironment("OTEL_BSP_SCHEDULE_DELAY", "200")
+            .WithEnvironment("Logging__LogLevel__Default", "Warning")
+            .WithHealthCheck(requireProcessId: true)).ToArray();
+        foreach (var service in services)
+            foreach (var reference in services.Where(reference => reference != service))
+                service.WithReference(reference);
+
+        var application = builder.Build();
         try
         {
-            // Reserve every endpoint before starting children, so all service addresses are known.
-            foreach (var brick in bricks)
-                services.Add(new ServiceProcess(brick));
-
-            var addresses = services.ToDictionary(service => service.Name, service => service.Address, StringComparer.Ordinal);
-            foreach (var service in services)
-                service.Start(architecture.StoreOf(service.Name), addresses, SpanRecorder.ReceiverAddress);
-            foreach (var service in services)
-                await service.WaitForReadyAsync(timeout.Token).ConfigureAwait(false);
-
-            return new RunningSystem(architecture.Kind, services);
+            await application.StartAsync().ConfigureAwait(false);
+            return new RunningSystem(architecture.Kind, bricks, application);
+        }
+        catch (InvalidOperationException exception)
+        {
+            await application.DisposeAsync().ConfigureAwait(false);
+            throw new ArchitectureException(exception.Message);
         }
         catch
         {
-            await Task.WhenAll(services.Select(service => service.DisposeAsync().AsTask())).ConfigureAwait(false);
+            await application.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }

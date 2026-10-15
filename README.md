@@ -21,9 +21,10 @@ Run with the .NET SDK pinned in `global.json`:
 dotnet test --project tests/Checkout.Tests/Checkout.Tests.csproj --report-trx --results-directory TestResults
 ```
 
-The test command builds the referenced API projects. The fixture starts their compiled
-executables, reserves distinct loopback ports, passes the selected service addresses and
-store names, and waits for each `/health` endpoint to return that child's process ID.
+The test command builds the referenced API projects. The fixture composes their compiled
+executables through `Qyl.Orchestration` 13.1.0. qyl reserves distinct loopback ports, passes
+service references, waits for each `/health` response to match its child's process ID, and
+owns process startup and shutdown. The fixture supplies the architecture's store names.
 Startup failures include the child's recent output. Failed startup and assembly cleanup
 stop the child processes. Only the selected services are launched.
 
@@ -34,11 +35,10 @@ endpoint, with a short export interval and sampling enabled. No external collect
 database is needed. The stores demonstrate ownership through spans; they are not persistent
 databases.
 
-Aspire's AppHost, SDK and testing package have been removed. Process lifecycle and service
-addresses belong to the small `Architecture.Testing` fixture. The qyl CLI's current
-orchestrator is internal and starts its collectors; it is not a public host for these API
-projects. `qyl-api-schema` describes collector APIs, which this local trace receiver does not
-call. The four qyl source repositories do not need modifications for this prototype.
+Aspire's AppHost, SDK and testing package have been removed. `Qyl.Orchestration` contains
+the supervisor shared with the qyl CLI; the prototype has no custom process launcher and
+uses its published NuGet package. No sibling clone or copied orchestration source is needed.
+`qyl-api-schema` describes collector APIs, which this local trace receiver does not call.
 
 The checkout tests cover microservices, a distributed monolith and a single-service monolith,
 including the exported qyl store spans and the orders-to-payments call. Hosting tests cover
