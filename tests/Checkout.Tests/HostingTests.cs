@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
-using System.Reflection;
 using Architecture.Testing;
 
 namespace Checkout.Tests;
@@ -60,19 +59,4 @@ public sealed class HostingTests(TestContext testContext)
         _ = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => RunningSystem.StartAsync(
             new MonolithAttribute(), [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")],
             new CancellationToken(canceled: true)));
-
-    /// <summary>The architecture wrapper preserves navigation to the original test source.</summary>
-    [TestMethod]
-    public void WrappedTestRetainsOriginalSourceLocation()
-    {
-        var original = typeof(HostingTests)
-            .GetMethod(nameof(SelectedServiceRunsInItsOwnProcessAndDisposalStopsIt))!
-            .GetCustomAttribute<TestMethodAttribute>()!;
-        var wrapped = new MonolithAttribute().GetTestMethodAttribute(original);
-
-        Assert.Contains("HostingTests.cs", original.DeclaringFilePath);
-        Assert.IsNotNull(original.DeclaringLineNumber);
-        Assert.AreEqual(original.DeclaringFilePath, wrapped.DeclaringFilePath);
-        Assert.AreEqual(original.DeclaringLineNumber, wrapped.DeclaringLineNumber);
-    }
 }

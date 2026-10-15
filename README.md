@@ -51,11 +51,14 @@ The package's `qyl-telemetry` guide documents the orchestrator integration and t
 child environment settings used here for the OTLP endpoint and HTTP/protobuf protocol.
 
 Aspire's AppHost, SDK and testing package have been removed. `Qyl.Orchestration` contains
-the supervisor shared with the qyl CLI; the prototype has no custom process launcher and
+the supervisor shared with the qyl CLI; the prototype has no custom service launcher and
 uses its published NuGet package. No sibling clone or copied orchestration source is needed.
 `qyl-api-schema` describes collector APIs, which this local trace receiver does not call.
 
 The checkout tests cover microservices, a distributed monolith and a single-service monolith,
 including the exported qyl store spans and the orders-to-payments call. Hosting tests cover
-process isolation, service selection, shutdown, startup cancellation, a missing dependency's
-startup error, and preservation of the wrapped test's source location.
+process isolation, service selection, shutdown, startup cancellation and a missing dependency's
+startup error. A discovery test launches the test runner with `--list-tests json` and checks
+the original file and line for every architecture test. MSTest reads these locations from
+the original `[TestMethod]` during discovery; the execution wrapper does not need to copy
+them or suppress a caller-information inspection.
