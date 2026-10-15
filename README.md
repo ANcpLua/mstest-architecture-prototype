@@ -15,6 +15,9 @@ public sealed class CheckoutTests
 }
 ```
 
+The tests use MSTest SDK 4.5.1, Microsoft.Testing.Platform 2.5.1 and Microsoft
+coverage 18.12.0.
+
 Run the tests and inspections with the .NET SDK pinned in `global.json`:
 
 ```sh
@@ -62,3 +65,22 @@ startup error. A discovery test launches the test runner with `--list-tests json
 the original file and line for every architecture test. MSTest reads these locations from
 the original `[TestMethod]` during discovery; the execution wrapper does not need to copy
 them or suppress a caller-information inspection.
+
+## Coverage
+
+Use DotCov 4.5.0 or later. `coverage.config` measures Architecture.Testing, Orders.Api
+and Payments.Api, including their child processes. These are the same settings used
+for the coverage investigation. The repository has no coverage threshold policy.
+
+```sh
+coverage_run_dir="artifacts/coverage/$(date +%Y%m%d-%H%M%S)"
+dotnet test --project tests/Checkout.Tests/Checkout.Tests.csproj -c Release \
+  --minimum-expected-tests 8 --report-trx --results-directory "$coverage_run_dir" \
+  --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml \
+  --coverage-settings coverage.config
+dotcov report "$coverage_run_dir/coverage.cobertura.xml" --format json --top 100
+```
+
+Keep the Cobertura report, test results and DotCov diagnostics. All three assemblies
+and all 14 tracked C# source files should appear. Uncovered lines and partial branches
+identify behavior the tests have not exercised.
