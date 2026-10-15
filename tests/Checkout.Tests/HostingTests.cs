@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using Architecture.Testing;
-using OrdersApi = Orders.Api.EntryPoint;
-using PaymentsApi = Payments.Api.EntryPoint;
 
 namespace Checkout.Tests;
 
@@ -12,20 +10,29 @@ public sealed class HostingTests
     [TestMethod]
     public async Task Selected_service_runs_in_its_own_process_and_disposal_stops_it()
     {
-        await using var system = await RunningSystem.StartAsync(new MonolithAttribute(),
-            [new ServiceAttribute<PaymentsApi>("payments-api")]);
-        using var client = system.Client<PaymentsApi>();
-        var processId = await client.GetFromJsonAsync<int>("/health");
-        using var child = Process.GetProcessById(processId);
+        var system = await RunningSystem.StartAsync(new MonolithAttribute(),
+            [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")]);
+        Process? child = null;
+        try
+        {
+            await using (system)
+            {
+                using var client = system.Client<Payments.Api.EntryPoint>();
+                var processId = await client.GetFromJsonAsync<int>("/health");
+                child = Process.GetProcessById(processId);
 
-        Assert.AreNotEqual(Environment.ProcessId, processId);
-        CollectionAssert.AreEqual(new[] { "payments-api" }, system.Bricks.ToArray());
-        Assert.ThrowsExactly<ArchitectureException>(() => system.Client<OrdersApi>());
+                Assert.AreNotEqual(Environment.ProcessId, processId);
+                CollectionAssert.AreEqual(new[] { "payments-api" }, system.Bricks.ToArray());
+                Assert.ThrowsExactly<ArchitectureException>(system.Client<Orders.Api.EntryPoint>);
+            }
 
-        await system.DisposeAsync();
-
-        Assert.IsTrue(child.HasExited);
-        Assert.ThrowsExactly<ObjectDisposedException>(() => system.Client<PaymentsApi>());
+            Assert.IsTrue(child.HasExited);
+            Assert.ThrowsExactly<ObjectDisposedException>(system.Client<Payments.Api.EntryPoint>);
+        }
+        finally
+        {
+            child?.Dispose();
+        }
     }
 
     [TestMethod]
@@ -34,7 +41,7 @@ public sealed class HostingTests
         var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(async () =>
         {
             await using var system = await RunningSystem.StartAsync(new MonolithAttribute(),
-                [new ServiceAttribute<OrdersApi>("orders-api")]);
+                [new ServiceAttribute<Orders.Api.EntryPoint>("orders-api")]);
         });
 
         StringAssert.Contains(failure.Message, "exited with code");

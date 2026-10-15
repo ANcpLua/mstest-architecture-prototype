@@ -28,12 +28,15 @@ owns process startup and shutdown. The fixture supplies the architecture's store
 Startup failures include the child's recent output. Failed startup and assembly cleanup
 stop the child processes. Only the selected services are launched.
 
-`Qyl.Telemetry.Hosting` 25.0.2 supplies `builder.AddQyl()`, automatic HTTP instrumentation
+`Qyl.Telemetry.Hosting` 25.0.3 supplies `builder.AddQyl()`, automatic HTTP instrumentation
 and OTLP export. Its transitive SemanticConventions 10.0.1 package supplies `Spans.DbClient`
 for the simulated in-memory store writes. Tests receive telemetry on an isolated local
 endpoint, with a short export interval and sampling enabled. No external collector or
 database is needed. The stores demonstrate ownership through spans; they are not persistent
 databases.
+
+The package's `qyl-telemetry` guide documents the orchestrator integration and the
+child environment settings used here for the OTLP endpoint and HTTP/protobuf protocol.
 
 Aspire's AppHost, SDK and testing package have been removed. `Qyl.Orchestration` contains
 the supervisor shared with the qyl CLI; the prototype has no custom process launcher and
