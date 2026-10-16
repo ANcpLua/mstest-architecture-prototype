@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.8.2
 
 - Require 100% line and branch coverage when `./build.sh` runs the 76 tests through
   globally installed DotCov. Keep each run's coverage reports and existing source scope.
