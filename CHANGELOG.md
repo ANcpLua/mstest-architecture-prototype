@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Require 100% line and branch coverage when `./build.sh` runs the 76 tests through
+  globally installed DotCov. Keep each run's coverage reports and existing source scope.
+- Fix naming and style issues reported by JetBrains inspections in the build project.
+
 ## 4.8.1
 
 - Test missing server-address features, empty bound-address collections and activity

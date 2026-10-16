@@ -18,15 +18,18 @@ public sealed class CheckoutTests
 The tests use MSTest SDK 4.5.1, Microsoft.Testing.Platform 2.5.1 and Microsoft
 coverage 18.12.0.
 
-Run the tests and inspections with the .NET SDK pinned in `global.json`:
+Run the tests, coverage gate and inspections with the .NET SDK pinned in
+`global.json` and globally installed DotCov 4.7.0 or later:
 
 ```sh
-./build.sh
+./build.sh --configuration Release
 ```
 
-The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, runs all
-76 tests, and runs InspectCode against their build outputs. It fails on inspection
-warnings, errors or suggestions; the report is `artifacts/jb-inspections.xml`.
+The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, builds
+the solution, runs all 76 tests through global `dotcov`, requires 100% line and
+branch coverage, and runs InspectCode against their build outputs. It fails on
+test failures, coverage below either threshold, or inspection warnings, errors or
+suggestions. The report is `artifacts/jb-inspections.xml`.
 `.editorconfig` promotes enabled analyzer suggestions, including MSTest's cancellation
 guidance, to build warnings, which the project treats as errors.
 
@@ -77,15 +80,15 @@ standalone passing suite.
 
 Use DotCov 4.7.0 or later. `dotcov test` flushes pending Microsoft coverage counters
 when the expected startup-error child terminates. `coverage.config` measures all three
-source assemblies, including their child processes. The repository has no coverage
-threshold policy, so `--min-line 0` leaves the gate disabled (exit 4).
+source assemblies, including their child processes. Both line and branch coverage
+must reach 100%; `./build.sh` enforces these thresholds without coverage exclusions.
 
 ```sh
 mkdir -p artifacts
-dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 0 --format json -- \
+dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 100 --min-branch 100 --format json -- \
   -c Release --minimum-expected-tests 76 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
-  > artifacts/coverage.json
+  > artifacts/coverage.json 2> artifacts/coverage.stderr
 ```
 
 DotCov writes each run's XML, test results and log into a fresh `TestResults/<run>`
