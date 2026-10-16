@@ -33,5 +33,9 @@ public static class ArchitectureFixtures
             .OrderBy(source => source.Key, StringComparer.Ordinal)
             .Select(source => $"{source.Value,5}  {source.Key}");
         await File.WriteAllLinesAsync(Path.Combine(AppContext.BaseDirectory, SourcesFile), lines, context.CancellationToken).ConfigureAwait(false);
+        foreach (var path in SpanRecorder.EvidenceFiles)
+        {
+            context.AddResultFile(path);
+        }
     }
 }

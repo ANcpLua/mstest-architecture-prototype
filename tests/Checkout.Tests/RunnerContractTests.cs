@@ -59,6 +59,22 @@ public sealed class RunnerContractTests
     }
 
     [Service<Payments.Api.EntryPoint>("payments-api")]
+    private sealed class EmptyResultsFixture
+    {
+        public static void Body() { }
+    }
+
+    /// <summary>An empty original result array remains empty instead of becoming an indexing failure.</summary>
+    [TestMethod]
+    public async Task EmptyOriginalResultsArePreserved()
+    {
+        TestResult[] expected = [];
+        var wrapper = new MonolithAttribute().GetTestMethodAttribute(new ResultsAttribute(expected));
+        var method = new StubMethod(typeof(EmptyResultsFixture).GetMethod(nameof(EmptyResultsFixture.Body))!);
+        Assert.AreSame(expected, await wrapper.ExecuteAsync(method));
+    }
+
+    [Service<Payments.Api.EntryPoint>("payments-api")]
     private sealed class WrapperFixture
     {
         public static void Body() { }

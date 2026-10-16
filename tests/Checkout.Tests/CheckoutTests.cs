@@ -34,13 +34,13 @@ public sealed class CheckoutAsMicroservices(TestContext testContext)
 
         var trace = await SystemUnderTest.Current.TraceAsync(testContext.CancellationToken);
 
-        Assert.Contains(new ServiceCall("orders-api", "payments-api"), trace.Calls);
-        var writes = trace.Spans.Where(span => span.Store is not null).ToArray();
+        Assert.Contains(call => call is { From: "orders-api", To: "payments-api" }, trace.Calls);
+        var writes = trace.Spans.Where(span => span.GetString("db.namespace") is not null).ToArray();
         Assert.HasCount(2, writes);
-        Assert.IsTrue(writes.All(span => span.Source == QylTelemetryNames.Scopes.QylTelemetryApplication));
-        Assert.IsTrue(writes.All(span => span.Attribute("qyl.instrumentation.domain") == "db.client"));
-        Assert.AreEqual("orders-api", trace.StoresOf("orders-api").Single());
-        Assert.AreEqual("payments-api", trace.StoresOf("payments-api").Single());
+        Assert.IsTrue(writes.All(span => span.Scope?.Name == QylTelemetryNames.Scopes.QylTelemetryApplication));
+        Assert.IsTrue(writes.All(span => span.GetString("qyl.instrumentation.domain") == "db.client"));
+        Assert.AreEqual("orders-api", trace.StoresOf("orders-api").Single().Namespace);
+        Assert.AreEqual("payments-api", trace.StoresOf("payments-api").Single().Namespace);
     }
 }
 
@@ -60,8 +60,8 @@ public sealed class CheckoutAsDistributedMonolith(TestContext testContext)
 
         Assert.AreEqual(DistributedMonolithAttribute.SharedStore, order.OrdersStore);
         Assert.AreEqual(DistributedMonolithAttribute.SharedStore, order.PaymentsStore);
-        Assert.AreEqual(DistributedMonolithAttribute.SharedStore, trace.StoresOf("orders-api").Single());
-        Assert.AreEqual(DistributedMonolithAttribute.SharedStore, trace.StoresOf("payments-api").Single());
+        Assert.AreEqual(DistributedMonolithAttribute.SharedStore, trace.StoresOf("orders-api").Single().Namespace);
+        Assert.AreEqual(DistributedMonolithAttribute.SharedStore, trace.StoresOf("payments-api").Single().Namespace);
     }
 }
 
@@ -89,7 +89,7 @@ public sealed class PaymentsAsMonolith(TestContext testContext)
         Assert.AreEqual("payments-api", receipt?.Store);
 
         var trace = await SystemUnderTest.Current.TraceAsync(testContext.CancellationToken);
-        Assert.HasCount(1, trace.Spans.Where(span => span.Store is not null));
+        Assert.HasCount(1, trace.Spans.Where(span => span.GetString("db.namespace") is not null));
     }
 }
 

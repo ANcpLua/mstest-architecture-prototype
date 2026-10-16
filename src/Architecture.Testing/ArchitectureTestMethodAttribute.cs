@@ -31,6 +31,10 @@ internal sealed class ArchitectureTestMethodAttribute(
         using (var test = system.Enter(testMethod.TestMethodName))
         {
             results = await inner.ExecuteAsync(testMethod).ConfigureAwait(false);
+            if (results.Length == 0)
+            {
+                return results;
+            }
             trace = await test.SettleAsync().ConfigureAwait(false);
         }
 

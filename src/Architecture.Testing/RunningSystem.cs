@@ -26,6 +26,8 @@ public sealed class RunningSystem : IAsyncDisposable
 
     /// <summary>The names of the running bricks.</summary>
     public IReadOnlyList<string> Bricks { get; }
+    internal IReadOnlyDictionary<string, Uri> Endpoints => _services.ToDictionary(
+        service => service.Name, service => _application.GetEndpoint(service.Name), StringComparer.Ordinal);
 
     /// <summary>The qyl platform query client for the current test run.</summary>
     public QylTelemetry Telemetry

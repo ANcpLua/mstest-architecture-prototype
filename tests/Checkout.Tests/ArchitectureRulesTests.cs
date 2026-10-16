@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using Qyl.Telemetry.SemanticConventions;
 using Architecture.Testing;
 
 namespace Checkout.Tests;
@@ -26,7 +26,7 @@ public sealed class ArchitectureRulesTests
     {
         var architecture = new MonolithAttribute();
         Assert.Contains("not measured", architecture.Verify(TestSpan.Trace(), ["orders"])!);
-        Assert.Contains("not measured", architecture.Verify(TestSpan.Trace(TestSpan.Create(Span.TestProcess, "1")), ["orders"])!);
+        Assert.Contains("not measured", architecture.Verify(TestSpan.Trace(TestSpan.Create(SpanRecorder.TestProcess, "1")), ["orders"])!);
         Assert.Contains("intruder produced spans", architecture.Verify(TestSpan.Trace(TestSpan.Create("intruder", "1")), ["orders"])!);
     }
 
@@ -56,11 +56,11 @@ public sealed class ArchitectureRulesTests
     public void MonolithRejectsCallsBetweenServices()
     {
         var architecture = new MonolithAttribute();
-        var external = TestSpan.Create(Span.TestProcess, "client", ActivityKind.Client);
-        var server = TestSpan.Create("orders", "server", ActivityKind.Server, "client");
+        var external = TestSpan.Create(SpanRecorder.TestProcess, "client", SpanKind.Client);
+        var server = TestSpan.Create("orders", "server", SpanKind.Server, "client");
         Assert.IsNull(architecture.Verify(TestSpan.Trace(external, server), ["orders"]));
-        var internalClient = external with { Service = "orders" };
-        var internalServer = server with { Service = "payments" };
+        var internalClient = TestSpan.Create("orders", "client", SpanKind.Client);
+        var internalServer = TestSpan.Create("payments", "server", SpanKind.Server, "client");
         Assert.Contains("orders called payments", architecture.Verify(TestSpan.Trace(internalClient, internalServer), ["orders", "payments"])!);
     }
 
@@ -72,7 +72,7 @@ public sealed class ArchitectureRulesTests
         var orders = TestSpan.Create("orders", "1", store: "orders");
         var payments = TestSpan.Create("payments", "2", store: "payments");
         Assert.IsNull(architecture.Verify(TestSpan.Trace(orders, payments), ["orders", "payments"]));
-        var failure = architecture.Verify(TestSpan.Trace(orders, payments with { Attributes = orders.Attributes }), ["orders", "payments"]);
+        var failure = architecture.Verify(TestSpan.Trace(orders, TestSpan.Create("payments", "2", store: "orders")), ["orders", "payments"]);
         Assert.IsNotNull(failure);
         Assert.Contains("Microservices own their stores", failure);
         Assert.Contains("orders and payments", failure);

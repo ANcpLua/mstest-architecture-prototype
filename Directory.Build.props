@@ -2,15 +2,17 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Version>5.0.2</Version>
+    <Version>5.0.3</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <QylTelemetryVersion>25.0.3</QylTelemetryVersion>
-    <QylPlatformVersion>13.2.0</QylPlatformVersion>
+    <QylTelemetryVersion>26.0.0</QylTelemetryVersion>
+    <QylPlatformVersion>14.0.0</QylPlatformVersion>
+    <QylTestingVersion>1.1.2</QylTestingVersion>
+    <QylApiContractsVersion>14.0.0</QylApiContractsVersion>
   </PropertyGroup>
 
 </Project>

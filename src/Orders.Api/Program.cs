@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using JetBrains.Annotations;
 using Orders.Api;
 using Qyl;
@@ -5,7 +7,9 @@ using Qyl;
 var builder = WebApplication.CreateBuilder(args);
 
 // qyl records HTTP and application spans and exports to the configured OTLP endpoint.
-builder.AddQyl();
+builder.AddQyl(options => options.AdditionalMeters.Add("Checkout.Orders"));
+using var meter = new Meter("Checkout.Orders", typeof(EntryPoint).Assembly.GetName().Version!.ToString(3));
+var ordersCreated = meter.CreateCounter<long>("checkout.orders.created", "{order}", "Successfully created orders");
 
 // The address of the payments service is handed in by the host that starts this service.
 var paymentsAddress = new Uri(builder.Configuration["services:payments-api:http:0"]
@@ -33,6 +37,11 @@ app.MapPost("/orders", async (PlaceOrder order, IHttpClientFactory clients) =>
         ?? throw new InvalidOperationException("The payments service returned no receipt.");
 
     logCreated(app.Logger, id, null);
+    ordersCreated.Add(1);
+    _ = Activity.Current?.AddEvent(new ActivityEvent("checkout.order.created", tags: new ActivityTagsCollection
+    {
+        ["checkout.order.id"] = id
+    }));
 
     return Results.Created($"/orders/{id}", new Order(id, order.Amount, store.Name, receipt.Store));
 });

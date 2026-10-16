@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.0.3
+
+- Align qyl and orchestration at 14.0.0, telemetry at 26.0.0, contracts at 14.0.0
+  and the canonical testing library at 1.1.2.
+- Replace the duplicated OTLP decoder and span model with the published testing
+  receiver and records. Keep every original export, typed signal and actual
+  collector response in retained evidence.
+- Wait for client/server evidence rather than a quiet interval. Preserve caller
+  cancellation, separate invocation traces, original MSTest results and discovery locations.
+- Record an actual order counter and business span event, and verify correlated
+  named logs plus native HTTP/runtime metric types, units and resource identity.
+- Keep coverage gaps visible without blanket library percentage thresholds;
+  require passing native invariants, valid coverage data and clean inspections.
+
 ## 5.0.2
 
 - Return HTTP 400 and a protobuf diagnostic for malformed trace exports instead

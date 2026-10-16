@@ -1,9 +1,11 @@
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Qyl.Api.Contracts.Common.Pagination;
 using Qyl.Api.Contracts.OTel.Logs;
 using Qyl.Api.Contracts.OTel.Metrics;
+using Qyl.Api.Contracts.OTel.Traces;
 
 namespace Architecture.Testing;
 
@@ -11,16 +13,22 @@ namespace Architecture.Testing;
 /// <param name="client">A client whose base address is the qyl collector.</param>
 public sealed class QylTelemetry(HttpClient client)
 {
-    internal async Task ExportAsync(string route, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    internal async Task<HttpResponseMessage> ExportAsync(string route, ReadOnlyMemory<byte> payload, string? contentType,
+        string? contentEncoding, CancellationToken cancellationToken)
     {
-        using var body = new ReadOnlyMemoryContent(payload);
-        body.Headers.ContentType = new MediaTypeHeaderValue("application/x-protobuf");
-        using var response = await client.PostAsync(route, body, cancellationToken).ConfigureAwait(false);
-        _ = response.EnsureSuccessStatusCode();
-        if ((await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false)).Length > 0)
+        using var request = new HttpRequestMessage(HttpMethod.Post, route);
+        request.Content = new ReadOnlyMemoryContent(payload);
+        if (contentType is not null)
         {
-            throw new InvalidDataException("qyl did not accept the complete telemetry export.");
+            request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
         }
+
+        if (!string.IsNullOrEmpty(contentEncoding))
+        {
+            request.Content.Headers.ContentEncoding.Add(contentEncoding);
+        }
+
+        return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads every page of logs correlated to one trace, preserving the qyl log records.</summary>
@@ -48,6 +56,18 @@ public sealed class QylTelemetry(HttpClient client)
 
             next = $"{route}&cursor={Uri.EscapeDataString(cursor)}";
         }
+    }
+
+    /// <summary>Reads the span events qyl stored for one trace, across all of its spans.</summary>
+    public async Task<IReadOnlyList<SpanEvent>> SpanEventsAsync(string traceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(traceId);
+        var trace = await ReadAsync<JsonElement>($"api/v1/traces/{Uri.EscapeDataString(traceId)}", cancellationToken).ConfigureAwait(false);
+        return [.. trace.GetProperty("spans").EnumerateArray()
+            .Where(span => span.TryGetProperty("events", out var events) && events.ValueKind == JsonValueKind.Array)
+            .SelectMany(span => span.GetProperty("events").EnumerateArray())
+            .Select(spanEvent => spanEvent.Deserialize<SpanEvent>()
+                ?? throw new InvalidDataException("qyl returned an empty span event."))];
     }
 
     /// <summary>Queries metric buckets for an explicit time window; metrics are not individual trace events.</summary>

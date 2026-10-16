@@ -83,8 +83,9 @@ public sealed class ApiFailureTests(TestContext testContext)
         while (true)
         {
             var logs = await SpanRecorder.Collector.Telemetry.LogsAsync(traceId, deadline.Token);
-            if (logs.Any(log => (int)log.SeverityNumber >= 17))
+            if (logs.FirstOrDefault(log => (int)log.SeverityNumber >= 17) is { } error)
             {
+                Assert.AreEqual("UnhandledException", error.EventName);
                 try
                 {
                     var trace = await Client.GetFromJsonAsync<JsonElement>(new Uri(SpanRecorder.Collector.Address, $"api/v1/traces/{traceId}"), deadline.Token);

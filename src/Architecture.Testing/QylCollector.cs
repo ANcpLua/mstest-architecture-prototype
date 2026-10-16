@@ -12,14 +12,13 @@ internal sealed class QylCollector : IAsyncDisposable
     private readonly HttpClient _client;
     private readonly Task<string> _output;
     private readonly Task<string> _error;
-    private readonly string _directory;
     private bool _disposed;
 
     private QylCollector(Process process, Uri address, string directory)
     {
         _process = process;
         Address = address;
-        _directory = directory;
+        DataDirectory = directory;
         _client = new HttpClient { BaseAddress = address };
         _output = process.StandardOutput.ReadToEndAsync();
         _error = process.StandardError.ReadToEndAsync();
@@ -28,6 +27,7 @@ internal sealed class QylCollector : IAsyncDisposable
 
     public Uri Address { get; }
     public QylTelemetry Telemetry { get; }
+    public string DataDirectory { get; }
 
     public static async Task<QylCollector> StartAsync(string assembly, CancellationToken cancellationToken = default)
     {
@@ -109,7 +109,7 @@ internal sealed class QylCollector : IAsyncDisposable
         _disposed = true;
         _process.Kill(entireProcessTree: true);
         await _process.WaitForExitAsync().ConfigureAwait(false);
-        await File.WriteAllTextAsync(Path.Combine(_directory, "collector.log"),
+        await File.WriteAllTextAsync(Path.Combine(DataDirectory, "collector.log"),
             await _output.ConfigureAwait(false) + await _error.ConfigureAwait(false)).ConfigureAwait(false);
         _client.Dispose();
         _process.Dispose();

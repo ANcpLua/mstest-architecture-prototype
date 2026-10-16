@@ -61,7 +61,8 @@ public sealed class HostingValidationTests(TestContext testContext)
                 Assert.AreSame(system, SystemUnderTest.Current);
                 using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
                 await cancellation.CancelAsync();
-                _ = await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => system.TraceAsync(cancellation.Token));
+                var failure = await Assert.ThrowsAsync<OperationCanceledException>(() => system.TraceAsync(cancellation.Token));
+                Assert.AreEqual(cancellation.Token, failure.CancellationToken);
             }
 
             _ = Assert.ThrowsExactly<InvalidOperationException>(() => SystemUnderTest.Current);
@@ -112,15 +113,16 @@ public sealed class HostingValidationTests(TestContext testContext)
         Assert.Contains("Qyl.Orchestration", failure.StackTrace);
     }
 
-    /// <summary>A steady stream of spans cannot keep settling alive indefinitely.</summary>
+    /// <summary>Completed service evidence remains usable while unrelated child work continues.</summary>
     [TestMethod]
     [Timeout(30_000, CooperativeCancellation = true)]
-    public async Task BusyTraceStillReachesItsSettlingDeadline()
+    public async Task BackgroundWorkDoesNotDelayACompleteTrace()
     {
         await using var system = await RunningSystem.StartAsync(new MonolithAttribute(),
             [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")], testContext.CancellationToken);
-        using var scope = system.Enter(nameof(BusyTraceStillReachesItsSettlingDeadline));
+        using var scope = system.Enter(nameof(BackgroundWorkDoesNotDelayACompleteTrace));
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
+        var firstSpan = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var productionToken = cancellation.Token;
         var producing = Task.Run(async () =>
         {
@@ -130,15 +132,21 @@ public sealed class HostingValidationTests(TestContext testContext)
                 {
                     await Task.Delay(50, productionToken);
                 }
+                _ = firstSpan.TrySetResult();
             }
         }, cancellation.Token);
 
         try
         {
-            var elapsed = Stopwatch.StartNew();
-            var trace = await scope.SettleAsync(testContext.CancellationToken);
-            Assert.IsGreaterThanOrEqualTo(TimeSpan.FromSeconds(9), elapsed.Elapsed);
-            Assert.IsGreaterThan(10, trace.Spans.Count);
+            await firstSpan.Task.WaitAsync(testContext.CancellationToken);
+            using var client = system.Client<Payments.Api.EntryPoint>();
+            Assert.AreEqual("payments-api", await client.GetStringAsync("/store", testContext.CancellationToken));
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(5));
+            var trace = await scope.SettleAsync(deadline.Token);
+            Assert.Contains(span => span.Name == "continuous-test-work", trace.Spans);
+            Assert.Contains(span => span is { Service: "payments-api", ParentSpanId: not null }, trace.Spans);
+            Assert.IsFalse(producing.IsCompleted);
         }
         finally
         {

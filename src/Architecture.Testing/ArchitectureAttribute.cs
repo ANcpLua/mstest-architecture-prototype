@@ -58,10 +58,10 @@ public abstract class ArchitectureAttribute : TestClassAttribute
 
         foreach (var service in trace.Services)
         {
-            var foreign = trace.StoresOf(service).Where(store => store != StoreOf(service)).ToList();
+            var foreign = trace.StoresOf(service).Where(store => store.Namespace != StoreOf(service)).ToList();
             if (foreign.Count > 0)
             {
-                return $"{service} wrote to {string.Join(", ", foreign)}, but as part of a {Kind} it owns the store {StoreOf(service)}.";
+                return $"{service} wrote to {string.Join(", ", foreign.Select(store => store.Namespace))}, but as part of a {Kind} it owns the store {StoreOf(service)}.";
             }
         }
 
@@ -84,7 +84,7 @@ public sealed class MonolithAttribute : ArchitectureAttribute
 
     /// <inheritdoc />
     protected override string? VerifyShape(TestTrace trace) =>
-        trace.Calls.FirstOrDefault(call => call.From != Span.TestProcess) is { From: { } from, To: { } to }
+        trace.Calls.FirstOrDefault(call => call.From != SpanRecorder.TestProcess) is { From: { } from, To: { } to }
             ? $"A monolith makes no network calls between its parts, but {from} called {to}."
             : null;
 }
@@ -104,12 +104,12 @@ public sealed class MicroservicesAttribute : ArchitectureAttribute
     {
         var shared = trace.Services
             .SelectMany(service => trace.StoresOf(service).Select(store => (Store: store, Service: service)))
-            .GroupBy(use => use.Store, StringComparer.Ordinal)
+            .GroupBy(use => use.Store)
             .FirstOrDefault(group => group.Count() > 1);
 
         return shared is null
             ? null
-            : $"Microservices own their stores, but {shared.Key} was written by {string.Join(" and ", shared.Select(use => use.Service))}.";
+            : $"Microservices own their stores, but {shared.Key.Namespace} was written by {string.Join(" and ", shared.Select(use => use.Service))}.";
     }
 }
 
@@ -130,10 +130,10 @@ public sealed class DistributedMonolithAttribute : ArchitectureAttribute
     protected override string? VerifyShape(TestTrace trace)
     {
         var writers = trace.Services.Where(service => trace.StoresOf(service).Count > 0).ToList();
-        var stores = writers.SelectMany(trace.StoresOf).Distinct(StringComparer.Ordinal).ToList();
+        var stores = writers.SelectMany(trace.StoresOf).Distinct().ToList();
 
         return writers.Count >= 2 && stores.Count > 1
-            ? $"A distributed monolith shares one store, but {string.Join(", ", writers)} wrote to {string.Join(", ", stores)}."
+            ? $"A distributed monolith shares one store, but {string.Join(", ", writers)} wrote to {string.Join(", ", stores.Select(store => store.Namespace))}."
             : null;
     }
 }

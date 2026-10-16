@@ -1,4 +1,5 @@
-using System.Text;
+using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -7,85 +8,87 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Qyl;
+using OpenTelemetry;
+using Qyl.Telemetry.Testing;
 
 namespace Architecture.Testing;
 
-/// <summary>Records exported spans for architecture checks and forwards every OTLP signal to qyl.</summary>
+/// <summary>Captures every OTLP export and relays the Collector's actual response to the producer.</summary>
 internal sealed class TraceReceiver : IAsyncDisposable
 {
+    private static readonly HttpClient Transport = new() { Timeout = TimeSpan.FromSeconds(15) };
     private readonly WebApplication _app;
+    private readonly ConcurrentQueue<ExportDelivery> _deliveries;
 
-    private TraceReceiver(WebApplication app, Uri address)
+    private TraceReceiver(WebApplication app, Uri address, ConcurrentQueue<ExportDelivery> deliveries)
     {
         _app = app;
         Address = address;
+        _deliveries = deliveries;
     }
 
-    /// <summary>The address the services export to.</summary>
     public Uri Address { get; }
+    public IReadOnlyList<ExportDelivery> Deliveries => [.. _deliveries];
 
-    public static async Task<TraceReceiver> StartAsync(Action<Span> record,
-        Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> export, Uri? collectorAddress = null)
+    public static async Task<TraceReceiver> StartAsync(OtlpReceiver capture, QylTelemetry collector,
+        CancellationToken cancellationToken = default)
     {
         var builder = WebApplication.CreateSlimBuilder();
         _ = builder.Logging.ClearProviders();
         _ = builder.WebHost.UseUrls("http://127.0.0.1:0");
-        if (collectorAddress is not null)
-        {
-            _ = builder.AddQyl(options =>
-            {
-                options.ServiceName = Span.TestProcess;
-                options.CollectorEndpoint = collectorAddress;
-            });
-        }
-
+        _ = builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 16 * 1024 * 1024);
         var app = builder.Build();
-        string[] routes = ["/v1/traces", "/v1/metrics", "/v1/logs"];
-        foreach (var route in routes)
+        var deliveries = new ConcurrentQueue<ExportDelivery>();
+        foreach (var signal in new[] { "traces", "metrics", "logs" })
         {
-            _ = app.MapPost(route, async (HttpRequest request, HttpResponse response, CancellationToken cancellationToken) =>
+            _ = app.MapPost($"/v1/{signal}", async (HttpRequest request, HttpResponse response, CancellationToken token) =>
             {
-                using var body = new MemoryStream();
-                await request.Body.CopyToAsync(body, cancellationToken).ConfigureAwait(false);
-                var payload = body.ToArray();
-                var spans = new List<Span>();
-                if (route == "/v1/traces")
+                using var buffer = new MemoryStream();
+                await request.Body.CopyToAsync(buffer, token).ConfigureAwait(false);
+                var payload = buffer.ToArray();
+                var encoding = request.Headers.ContentEncoding.ToString();
+                // This endpoint is an exporter destination. Its forwarding requests must not create
+                // telemetry that exports back into the same destination.
+                using var suppression = SuppressInstrumentationScope.Begin();
+                using var body = new ByteArrayContent(payload);
+                if (request.ContentType is not null)
                 {
-                    try
-                    {
-                        spans = OtlpTraces.Decode(payload);
-                    }
-                    catch (InvalidDataException error)
-                    {
-                        response.StatusCode = StatusCodes.Status400BadRequest;
-                        return Results.Bytes(ErrorStatus(error.Message), "application/x-protobuf");
-                    }
+                    body.Headers.ContentType = MediaTypeHeaderValue.Parse(request.ContentType);
                 }
 
-                await export(route, payload, cancellationToken).ConfigureAwait(false);
-                foreach (var span in spans)
+                if (encoding.Length > 0)
                 {
-                    record(span);
+                    body.Headers.ContentEncoding.Add(encoding);
                 }
 
-                return Results.Bytes([], "application/x-protobuf");
+                using var captured = await Transport.PostAsync(new Uri(capture.Endpoint, $"v1/{signal}"), body, token).ConfigureAwait(false);
+                var captureReply = await captured.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+                using var forwarded = await collector.ExportAsync($"v1/{signal}", payload, request.ContentType, encoding, token).ConfigureAwait(false);
+                var collectorReply = await forwarded.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+                deliveries.Enqueue(new ExportDelivery(signal, (int)captured.StatusCode, captureReply,
+                    (int)forwarded.StatusCode, collectorReply));
+                response.StatusCode = (int)forwarded.StatusCode;
+                response.ContentType = forwarded.Content.Headers.ContentType?.ToString();
+                response.Headers.ContentEncoding = forwarded.Content.Headers.ContentEncoding.ToArray();
+                await response.Body.WriteAsync(collectorReply, token).ConfigureAwait(false);
             });
         }
 
-        await app.StartAsync().ConfigureAwait(false);
-        var address = BoundAddress(app.Services.GetRequiredService<IServer>().Features);
-        return new TraceReceiver(app, address);
-    }
-
-    private static byte[] ErrorStatus(string message)
-    {
-        using var output = new MemoryStream();
-        using var writer = new BinaryWriter(output, Encoding.UTF8);
-        writer.Write((byte)0x12); // google.rpc.Status.message: field 2, length-delimited.
-        writer.Write(message);
-        writer.Flush();
-        return output.ToArray();
+        var transferred = false;
+        try
+        {
+            await app.StartAsync(cancellationToken).ConfigureAwait(false);
+            var receiver = new TraceReceiver(app, BoundAddress(app.Services.GetRequiredService<IServer>().Features), deliveries);
+            transferred = true;
+            return receiver;
+        }
+        finally
+        {
+            if (!transferred)
+            {
+                await app.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     internal static Uri BoundAddress(IFeatureCollection features)
@@ -95,10 +98,18 @@ internal sealed class TraceReceiver : IAsyncDisposable
         return new Uri(address);
     }
 
-    /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        await _app.StopAsync().ConfigureAwait(false);
-        await _app.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await _app.StopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await _app.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }
+
+internal sealed record ExportDelivery(string Signal, int CaptureStatus, byte[] CaptureResponse,
+    int CollectorStatus, byte[] CollectorResponse);

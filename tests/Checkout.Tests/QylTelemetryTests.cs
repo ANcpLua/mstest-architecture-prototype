@@ -67,6 +67,8 @@ public sealed class QylTelemetryTests(TestContext testContext)
             StartTime = start,
             EndTime = start.AddMinutes(1),
             StepMs = 1000,
+            NumericRepresentation = "float64",
+            Approximate = true,
             Series = [],
             Truncated = true
         };
@@ -85,16 +87,20 @@ public sealed class QylTelemetryTests(TestContext testContext)
         _ = await Assert.ThrowsExactlyAsync<ArgumentException>(() => telemetry.QueryMetricAsync(" ", start, start, cancellationToken: testContext.CancellationToken));
     }
 
-    /// <summary>Forwarding requires a complete OTLP acknowledgement and propagates HTTP failures.</summary>
+    /// <summary>Forwarding preserves the protocol reply, including a valid nonempty acknowledgement or HTTP error.</summary>
     [TestMethod]
-    public async Task TraceForwardingRejectsPartialAcceptance()
+    public async Task TraceForwardingPreservesTheActualAcknowledgement()
     {
         using var accepted = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([]) });
-        await new QylTelemetry(accepted).ExportAsync("v1/traces", ReadOnlyMemory<byte>.Empty, testContext.CancellationToken);
+        using var acceptedReply = await new QylTelemetry(accepted).ExportAsync("v1/traces", ReadOnlyMemory<byte>.Empty, "application/x-protobuf", null, testContext.CancellationToken);
+        Assert.AreEqual(HttpStatusCode.OK, acceptedReply.StatusCode);
         using var partial = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("\n\0"u8.ToArray()) });
-        _ = await Assert.ThrowsExactlyAsync<InvalidDataException>(() => new QylTelemetry(partial).ExportAsync("v1/traces", ReadOnlyMemory<byte>.Empty, testContext.CancellationToken));
+        using var acknowledged = await new QylTelemetry(partial).ExportAsync("v1/traces", ReadOnlyMemory<byte>.Empty, "application/x-protobuf", null, testContext.CancellationToken);
+        Assert.AreEqual(HttpStatusCode.OK, acknowledged.StatusCode);
+        Assert.AreSequenceEqual("\n\0"u8.ToArray(), await acknowledged.Content.ReadAsByteArrayAsync(testContext.CancellationToken));
         using var failed = Client(_ => new HttpResponseMessage(HttpStatusCode.BadRequest));
-        _ = await Assert.ThrowsExactlyAsync<HttpRequestException>(() => new QylTelemetry(failed).ExportAsync("v1/traces", ReadOnlyMemory<byte>.Empty, testContext.CancellationToken));
+        using var rejected = await new QylTelemetry(failed).ExportAsync("v1/traces", ReadOnlyMemory<byte>.Empty, "application/x-protobuf", null, testContext.CancellationToken);
+        Assert.AreEqual(HttpStatusCode.BadRequest, rejected.StatusCode);
     }
 
     private static HttpResponseMessage Json(string text) => new(HttpStatusCode.OK)
