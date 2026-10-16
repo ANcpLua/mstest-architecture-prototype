@@ -19,6 +19,7 @@ sealed class Build : FalloutBuild
     readonly Solution _solution;
 
     AbsolutePath TestResultsDirectory => RootDirectory / "TestResults";
+    AbsolutePath TestProject => _solution.GetAllProjects("Checkout.Tests").Single().Path;
 
     Target Restore => target => target
         .Executes(() =>
@@ -33,7 +34,7 @@ sealed class Build : FalloutBuild
         .Executes(() =>
         {
             DotNetBuild(s => s
-                .SetProjectFile(_solution)
+                .SetProjectFile(TestProject)
                 .SetConfiguration(_configuration)
                 .EnableNoLogo()
                 .EnableNoRestore());
@@ -44,12 +45,10 @@ sealed class Build : FalloutBuild
         .Produces(TestResultsDirectory / "**/*.trx")
         .Executes(() =>
         {
-            var project = _solution.GetAllProjects("Checkout.Tests").Single();
-
             // Microsoft.Testing.Platform, as selected in global.json
             ProcessTasks.StartProcess(
                     ToolPathResolver.GetPathExecutable("dotcov"),
-                    $"test \"{project.Path}\" --min-line 100 --min-branch 100 -- -c {_configuration} --no-build --no-restore --minimum-expected-tests 76 --report-trx --coverage-settings \"{RootDirectory / "coverage.config"}\" --coverage-output coverage.cobertura.xml",
+                    $"test \"{TestProject}\" --min-line 100 --min-branch 100 -- -c {_configuration} --no-build --no-restore --minimum-expected-tests 76 --report-trx --coverage-settings \"{RootDirectory / "coverage.config"}\" --coverage-output coverage.cobertura.xml",
                     RootDirectory)
                 .AssertZeroExitCode();
         });

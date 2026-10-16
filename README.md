@@ -25,9 +25,10 @@ Run the tests, coverage gate and inspections with the .NET SDK pinned in
 ./build.sh --configuration Release
 ```
 
-The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, builds
-the solution, runs all 76 tests through global `dotcov`, requires 100% line and
-branch coverage, and runs InspectCode against their build outputs. It fails on
+The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, then builds
+the test project and its references in the selected configuration. It runs all 76
+tests through global `dotcov`, requires 100% line and branch coverage, and runs
+InspectCode against their build outputs. It fails on
 test failures, coverage below either threshold, or inspection warnings, errors or
 suggestions. The report is `artifacts/jb-inspections.xml`.
 `.editorconfig` promotes enabled analyzer suggestions, including MSTest's cancellation

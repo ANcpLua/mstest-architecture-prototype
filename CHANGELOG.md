@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Build the test project directly so its child probes use the selected configuration
+  in a clean checkout.
+- Make the OTLP fixture's internal attribute helper private.
+
 ## 4.8.2
 
 - Require 100% line and branch coverage when `./build.sh` runs the 76 tests through

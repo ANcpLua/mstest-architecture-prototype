@@ -9,7 +9,7 @@ internal static class OtlpFixture
         service is null ? [] : Bytes(1, Attribute("service.name", Text(1, service))),
         Bytes(2, scope is null ? [] : Bytes(1, Text(1, scope)), Concat([.. spans.Select(span => Bytes(2, span))])));
 
-    public static byte[] Attribute(string key, byte[] value) => Bytes(1, Text(1, key), Bytes(2, value));
+    private static byte[] Attribute(string key, byte[] value) => Bytes(1, Text(1, key), Bytes(2, value));
 
     public static byte[] SpanAttribute(string key, byte[] value) => Bytes(9, Text(1, key), Bytes(2, value));
 
