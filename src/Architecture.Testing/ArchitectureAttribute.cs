@@ -48,7 +48,16 @@ public abstract class ArchitectureAttribute : TestClassAttribute
             {
                 return $"{service} produced spans but is not a stacked brick.";
             }
+        }
 
+        // Report the relationship between stores before checking each store's name.
+        if (VerifyShape(trace) is { } problem)
+        {
+            return problem;
+        }
+
+        foreach (var service in trace.Services)
+        {
             var foreign = trace.StoresOf(service).Where(store => store != StoreOf(service)).ToList();
             if (foreign.Count > 0)
             {
@@ -56,7 +65,7 @@ public abstract class ArchitectureAttribute : TestClassAttribute
             }
         }
 
-        return VerifyShape(trace);
+        return null;
     }
 
     /// <summary>The rule that sets this architecture apart, checked on the trace.</summary>

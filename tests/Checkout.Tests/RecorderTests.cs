@@ -1,0 +1,109 @@
+using System.Collections.Concurrent;
+using System.Net;
+using Architecture.Testing;
+using Qyl;
+using Qyl.Telemetry.SemanticConventions.Names;
+
+namespace Checkout.Tests;
+
+/// <summary>Checks actual activity capture and the receiver's HTTP contract.</summary>
+/// <param name="testContext">The runner context that supplies cancellation.</param>
+[TestClass]
+public sealed class RecorderTests(TestContext testContext)
+{
+    private static readonly HttpClient Client = new();
+
+    /// <summary>Stopping twice is safe and starting again restores the receiver and listener.</summary>
+    [TestMethod]
+    public async Task RecorderCanStopAndRestart()
+    {
+        await SpanRecorder.StopAsync();
+        try
+        {
+            await SpanRecorder.StopAsync();
+            _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.ReceiverAddress);
+            _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.Begin("not-listening"));
+        }
+        finally
+        {
+            await SpanRecorder.StartAsync();
+        }
+
+        var address = SpanRecorder.ReceiverAddress;
+        await SpanRecorder.StartAsync();
+        Assert.AreEqual(address, SpanRecorder.ReceiverAddress);
+    }
+
+    /// <summary>Real activity tags, parent IDs and trace cleanup are preserved.</summary>
+    [TestMethod]
+    public void ActivitiesBelongToTheirOwnTraceAndAreRemovedAtTheEnd()
+    {
+        using var root = SpanRecorder.Begin(nameof(ActivitiesBelongToTheirOwnTraceAndAreRemovedAtTheEnd));
+        var traceId = root.TraceId.ToHexString();
+        try
+        {
+            using (var child = Spans.Work("recording-test"))
+            {
+                Assert.IsNotNull(child);
+                _ = child.AddTag("http.response.status_code", 42);
+                _ = child.AddTag("error.type", (object?)null);
+            }
+
+            var spans = SpanRecorder.SpansOf(traceId);
+            Assert.HasCount(1, spans);
+            Assert.AreEqual(root.SpanId.ToHexString(), spans[0].ParentSpanId);
+            Assert.AreEqual("42", spans[0].Attribute("http.response.status_code"));
+            Assert.IsNull(spans[0].Attribute("error.type"));
+            Assert.IsGreaterThanOrEqualTo(1, SpanRecorder.Sources[QylTelemetryNames.Scopes.QylTelemetryApplication]);
+            Assert.IsEmpty(SpanRecorder.SpansOf("unrecorded-trace"));
+        }
+        finally
+        {
+            SpanRecorder.End(root);
+        }
+
+        Assert.IsEmpty(SpanRecorder.SpansOf(traceId));
+    }
+
+    /// <summary>Trace exports are decoded; empty traces, metrics and logs return OTLP responses.</summary>
+    [TestMethod]
+    public async Task ReceiverAcceptsAllExportRoutes()
+    {
+        var received = new ConcurrentQueue<Span>();
+        await using var receiver = await TraceReceiver.StartAsync(received.Enqueue);
+        foreach (var route in new[] { "/v1/traces", "/v1/metrics", "/v1/logs" })
+        {
+            using var empty = new ByteArrayContent([]);
+            using var response = await Client.PostAsync(new Uri(receiver.Address, route), empty, testContext.CancellationToken);
+            Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+            Assert.AreEqual("application/x-protobuf", response.Content.Headers.ContentType?.MediaType);
+            Assert.IsEmpty(await response.Content.ReadAsByteArrayAsync(testContext.CancellationToken));
+        }
+
+        using var content = new ByteArrayContent(OtlpFixture.Export("service", "scope", OtlpFixture.Text(5, "first"), OtlpFixture.Text(5, "second")));
+        using var export = await Client.PostAsync(new Uri(receiver.Address, "/v1/traces"), content, testContext.CancellationToken);
+        Assert.AreEqual(HttpStatusCode.OK, export.StatusCode);
+        Assert.AreSequenceEqual(["first", "second"], received.Select(span => span.Name));
+        using var malformed = new ByteArrayContent([0x0b]);
+        using var rejected = await Client.PostAsync(new Uri(receiver.Address, "/v1/traces"), malformed, testContext.CancellationToken);
+        Assert.AreEqual(HttpStatusCode.InternalServerError, rejected.StatusCode);
+        Assert.HasCount(2, received);
+    }
+
+    /// <summary>A malformed Kestrel endpoint remains a startup error instead of a ready receiver.</summary>
+    [TestMethod]
+    public async Task ReceiverRejectsInvalidListenerConfiguration()
+    {
+        const string setting = "Kestrel__Endpoints__Broken__Url";
+        var previous = Environment.GetEnvironmentVariable(setting);
+        try
+        {
+            Environment.SetEnvironmentVariable(setting, "invalid-listener-address");
+            _ = await Assert.ThrowsAsync<FormatException>(() => TraceReceiver.StartAsync(_ => { }));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(setting, previous);
+        }
+    }
+}

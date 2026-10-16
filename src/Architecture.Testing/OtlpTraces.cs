@@ -155,6 +155,11 @@ internal static class OtlpTraces
         while (position < message.Length)
         {
             var tag = ReadVarint(message.Span, ref position);
+            if (tag >> 3 is 0 or > 536870911)
+            {
+                throw new InvalidDataException($"Invalid protobuf field number at byte {position}.");
+            }
+
             var number = (int)(tag >> 3);
             switch ((Wire)(tag & 7))
             {
@@ -162,15 +167,24 @@ internal static class OtlpTraces
                     fields.Add(new Field(number, ReadVarint(message.Span, ref position), default));
                     break;
                 case Wire.Fixed64:
+                    RequireBytes(message, position, 8);
                     fields.Add(new Field(number, BinaryPrimitives.ReadUInt64LittleEndian(message.Span[position..]), default));
                     position += 8;
                     break;
                 case Wire.Bytes:
-                    var length = (int)ReadVarint(message.Span, ref position);
+                    var encodedLength = ReadVarint(message.Span, ref position);
+                    if (encodedLength > int.MaxValue)
+                    {
+                        throw new InvalidDataException($"Protobuf length exceeds the supported size at byte {position}.");
+                    }
+
+                    var length = (int)encodedLength;
+                    RequireBytes(message, position, length);
                     fields.Add(new Field(number, 0, message.Slice(position, length)));
                     position += length;
                     break;
                 case Wire.Fixed32:
+                    RequireBytes(message, position, 4);
                     fields.Add(new Field(number, BinaryPrimitives.ReadUInt32LittleEndian(message.Span[position..]), default));
                     position += 4;
                     break;
@@ -182,13 +196,26 @@ internal static class OtlpTraces
         return fields;
     }
 
+    private static void RequireBytes(ReadOnlyMemory<byte> message, int position, int count)
+    {
+        if (count > message.Length - position)
+        {
+            throw new InvalidDataException($"Truncated protobuf value at byte {position}.");
+        }
+    }
+
     private static ulong ReadVarint(ReadOnlySpan<byte> bytes, ref int position)
     {
         ulong result = 0;
         var shift = 0;
-        while (true)
+        while (position < bytes.Length)
         {
             var b = bytes[position++];
+            if (shift == 63 && b > 1)
+            {
+                throw new InvalidDataException($"Protobuf varint exceeds 64 bits at byte {position}.");
+            }
+
             result |= (ulong)(b & 0x7F) << shift;
             if ((b & 0x80) == 0)
             {
@@ -197,5 +224,7 @@ internal static class OtlpTraces
 
             shift += 7;
         }
+
+        throw new InvalidDataException($"Truncated protobuf varint at byte {position}.");
     }
 }

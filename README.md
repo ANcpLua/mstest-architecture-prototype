@@ -25,7 +25,7 @@ Run the tests and inspections with the .NET SDK pinned in `global.json`:
 ```
 
 The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, runs all
-eight tests, and runs InspectCode against their build outputs. It fails on inspection
+67 tests, and runs InspectCode against their build outputs. It fails on inspection
 warnings, errors or suggestions; the report is `artifacts/jb-inspections.xml`.
 `.editorconfig` promotes enabled analyzer suggestions, including MSTest's cancellation
 guidance, to build warnings, which the project treats as errors.
@@ -66,6 +66,13 @@ the original file and line for every architecture test. MSTest reads these locat
 the original `[TestMethod]` during discovery; the execution wrapper does not need to copy
 them or suppress a caller-information inspection.
 
+Regression tests also cover invalid architecture declarations, store ownership, malformed
+OTLP payloads, receiver startup failure, API fallbacks and payment failures. Three deliberately
+failing cases live in `tests/Architecture.Probes`. The main suite runs each in a separate
+MSTest process and checks its exit code and TRX diagnostic, including preservation of an
+original assertion failure. The probe project is built by the test project; it is not a
+standalone passing suite.
+
 ## Coverage
 
 Use DotCov 4.7.0 or later. `dotcov test` flushes pending Microsoft coverage counters
@@ -76,7 +83,7 @@ threshold policy, so `--min-line 0` leaves the gate disabled (exit 4).
 ```sh
 mkdir -p artifacts
 dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 0 --format json -- \
-  -c Release --minimum-expected-tests 8 --report-trx \
+  -c Release --minimum-expected-tests 67 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
   > artifacts/coverage.json
 ```

@@ -4,6 +4,7 @@
     <ProjectReference Include="../../src/Architecture.Testing/Architecture.Testing.csproj" />
     <ProjectReference Include="../../src/Orders.Api/Orders.Api.csproj" />
     <ProjectReference Include="../../src/Payments.Api/Payments.Api.csproj" />
+    <ProjectReference Include="../Architecture.Probes/Architecture.Probes.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
