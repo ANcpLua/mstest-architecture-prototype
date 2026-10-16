@@ -79,14 +79,10 @@ internal static class OtlpTraces
                     name = Text(field.Bytes);
                     break;
                 case 6:
-                    kind = field.Value switch
-                    {
-                        2 => ActivityKind.Server,
-                        3 => ActivityKind.Client,
-                        4 => ActivityKind.Producer,
-                        5 => ActivityKind.Consumer,
-                        _ => ActivityKind.Internal,
-                    };
+                    // OTLP kinds 1 through 5 correspond to ActivityKind values 0 through 4.
+                    kind = field.Value is >= 1 and <= 5
+                        ? (ActivityKind)(field.Value - 1)
+                        : ActivityKind.Internal;
                     break;
                 case 9:
                     var (key, value) = DecodeKeyValue(field.Bytes);

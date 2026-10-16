@@ -25,7 +25,7 @@ Run the tests and inspections with the .NET SDK pinned in `global.json`:
 ```
 
 The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, runs all
-67 tests, and runs InspectCode against their build outputs. It fails on inspection
+76 tests, and runs InspectCode against their build outputs. It fails on inspection
 warnings, errors or suggestions; the report is `artifacts/jb-inspections.xml`.
 `.editorconfig` promotes enabled analyzer suggestions, including MSTest's cancellation
 guidance, to build warnings, which the project treats as errors.
@@ -83,7 +83,7 @@ threshold policy, so `--min-line 0` leaves the gate disabled (exit 4).
 ```sh
 mkdir -p artifacts
 dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 0 --format json -- \
-  -c Release --minimum-expected-tests 67 --report-trx \
+  -c Release --minimum-expected-tests 76 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
   > artifacts/coverage.json
 ```

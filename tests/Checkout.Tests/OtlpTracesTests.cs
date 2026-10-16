@@ -17,13 +17,15 @@ public sealed class OtlpTracesTests
     [DataRow(4, ActivityKind.Producer)]
     [DataRow(5, ActivityKind.Consumer)]
     [DataRow(6, ActivityKind.Internal)]
+    [DataRow(-1, ActivityKind.Internal)]
+    [DataRow(int.MaxValue, ActivityKind.Internal)]
     public void SpanIdentityAndKindsAreDecoded(int kind, ActivityKind expected)
     {
         var message = OtlpFixture.Export("payments", "instrumentation",
             OtlpFixture.Concat(OtlpFixture.Bytes(1, Convert.FromHexString(TestSpan.TraceId)),
                 OtlpFixture.Bytes(2, Convert.FromHexString("0102030405060708")),
                 OtlpFixture.Bytes(4, Convert.FromHexString("1112131415161718")),
-                OtlpFixture.Text(5, "charge €"), OtlpFixture.Number(6, (ulong)kind)));
+                OtlpFixture.Text(5, "charge €"), OtlpFixture.Number(6, unchecked((ulong)kind))));
         var spans = OtlpTraces.Decode(message);
         Assert.HasCount(1, spans);
         var span = spans[0];

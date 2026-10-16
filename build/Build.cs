@@ -47,7 +47,7 @@ sealed class Build : FalloutBuild
             var project = Solution.GetAllProjects("Checkout.Tests").Single();
 
             // Microsoft.Testing.Platform, as selected in global.json
-            DotNet($"test --project {project.Path} -c {Configuration} --no-restore --results-directory {TestResultsDirectory} --minimum-expected-tests 67 --report-trx");
+            DotNet($"test --project {project.Path} -c {Configuration} --no-restore --results-directory {TestResultsDirectory} --minimum-expected-tests 76 --report-trx");
         });
 
     Target InspectCode => _ => _

@@ -106,7 +106,9 @@ public sealed class HostingValidationTests(TestContext testContext)
         var start = RunningSystem.StartAsync(new MonolithAttribute(),
             [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")], cancellation.Token);
         await cancellation.CancelAsync();
-        _ = await Assert.ThrowsAsync<OperationCanceledException>(() => start);
+        var failure = await Assert.ThrowsAsync<OperationCanceledException>(() => start);
+        Assert.IsNotNull(failure.StackTrace);
+        Assert.Contains("Qyl.Orchestration", failure.StackTrace);
     }
 
     /// <summary>A steady stream of spans cannot keep settling alive indefinitely.</summary>

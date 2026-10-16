@@ -143,20 +143,27 @@ public sealed class RunningSystem : IAsyncDisposable
         }
 
         var application = builder.Build();
+        var startup = StartApplicationAsync();
         try
+        {
+            return await startup.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            await application.DisposeAsync().ConfigureAwait(false);
+            if (exception is InvalidOperationException)
+            {
+                throw new ArchitectureException(exception.Message);
+            }
+
+            // Forward the original failed task after cleanup, preserving its exception and stack.
+            return await startup.ConfigureAwait(false);
+        }
+
+        async Task<RunningSystem> StartApplicationAsync()
         {
             await application.StartAsync(cancellationToken).ConfigureAwait(false);
             return new RunningSystem(architecture.Kind, bricks, application);
-        }
-        catch (InvalidOperationException exception)
-        {
-            await application.DisposeAsync().ConfigureAwait(false);
-            throw new ArchitectureException(exception.Message);
-        }
-        catch
-        {
-            await application.DisposeAsync().ConfigureAwait(false);
-            throw;
         }
     }
 }

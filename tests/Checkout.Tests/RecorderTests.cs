@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
 using Architecture.Testing;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http.Features;
 using Qyl;
 using Qyl.Telemetry.SemanticConventions.Names;
 
@@ -65,6 +67,68 @@ public sealed class RecorderTests(TestContext testContext)
         Assert.IsEmpty(SpanRecorder.SpansOf(traceId));
     }
 
+    /// <summary>Arbitrary activity tag values keep their text, including a null ToString result.</summary>
+    [TestMethod]
+    [DynamicData(nameof(ActivityTagValues))]
+    public void ActivityTagValuesAreConvertedToText(string key, object? value, string? expected)
+    {
+        using var root = SpanRecorder.Begin(nameof(ActivityTagValuesAreConvertedToText));
+        var traceId = root.TraceId.ToHexString();
+        try
+        {
+            using (var activity = Spans.Work("tag-conversion-test"))
+            {
+                Assert.IsNotNull(activity);
+                _ = activity.AddTag(key, value);
+            }
+
+            var recorded = SpanRecorder.SpansOf(traceId);
+            Assert.HasCount(1, recorded);
+            Assert.AreEqual(expected, recorded[0].Attribute(key));
+            Assert.AreEqual(value is not null, recorded[0].Attributes.ContainsKey(key));
+        }
+        finally
+        {
+            SpanRecorder.End(root);
+        }
+    }
+
+    /// <summary>Each row supplies a fresh, inert tag value for the activity recorder.</summary>
+    public static IEnumerable<object?[]> ActivityTagValues()
+    {
+        yield return ["error.type", "failed", "failed"];
+        yield return ["http.response.status_code", 503, "503"];
+        yield return ["error.type", null, null];
+        yield return ["error.type", new NullText(), ""];
+    }
+
+    /// <summary>Both a missing feature and an empty address collection fail with the original diagnostic.</summary>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void ReceiverRequiresABoundAddress(bool hasFeature)
+    {
+        var features = new FeatureCollection();
+        if (hasFeature)
+        {
+            features.Set<IServerAddressesFeature>(new ServerAddressesFeature());
+        }
+
+        var failure = Assert.ThrowsExactly<InvalidOperationException>(() => TraceReceiver.BoundAddress(features));
+        Assert.AreEqual("The trace receiver has no address.", failure.Message);
+    }
+
+    /// <summary>The selected endpoint is the address that the server actually bound.</summary>
+    [TestMethod]
+    public void ReceiverUsesTheServersBoundAddress()
+    {
+        var features = new FeatureCollection();
+        var addresses = new ServerAddressesFeature();
+        addresses.Addresses.Add("http://127.0.0.1:43210");
+        features.Set<IServerAddressesFeature>(addresses);
+        Assert.AreEqual(new Uri("http://127.0.0.1:43210"), TraceReceiver.BoundAddress(features));
+    }
+
     /// <summary>Trace exports are decoded; empty traces, metrics and logs return OTLP responses.</summary>
     [TestMethod]
     public async Task ReceiverAcceptsAllExportRoutes()
@@ -105,5 +169,10 @@ public sealed class RecorderTests(TestContext testContext)
         {
             Environment.SetEnvironmentVariable(setting, previous);
         }
+    }
+
+    private sealed class NullText
+    {
+        public override string? ToString() => null;
     }
 }

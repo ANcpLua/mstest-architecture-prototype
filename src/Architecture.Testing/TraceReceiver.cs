@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -42,16 +43,24 @@ internal sealed class TraceReceiver : IAsyncDisposable
         });
 
         // Metrics and logs are accepted and dropped, so the services do not log failed exports.
-        _ = app.MapPost("/v1/metrics", AcceptExport);
-        _ = app.MapPost("/v1/logs", AcceptExport);
+        string[] ignoredExports = ["/v1/metrics", "/v1/logs"];
+        foreach (var route in ignoredExports)
+        {
+            _ = app.MapPost(route, AcceptExport);
+        }
 
         await app.StartAsync().ConfigureAwait(false);
-        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault()
-            ?? throw new InvalidOperationException("The trace receiver has no address.");
-
-        return new TraceReceiver(app, new Uri(address));
+        var address = BoundAddress(app.Services.GetRequiredService<IServer>().Features);
+        return new TraceReceiver(app, address);
 
         static IResult AcceptExport() => Results.Bytes([], "application/x-protobuf");
+    }
+
+    internal static Uri BoundAddress(IFeatureCollection features)
+    {
+        var address = features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault()
+            ?? throw new InvalidOperationException("The trace receiver has no address.");
+        return new Uri(address);
     }
 
     /// <inheritdoc />
