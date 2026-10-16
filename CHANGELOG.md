@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.8.3
 
 - Build the test project directly so its child probes use the selected configuration
   in a clean checkout.
