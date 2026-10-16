@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.8.1
 
 - Test missing server-address features, empty bound-address collections and activity
   tag values whose text conversion returns null.
