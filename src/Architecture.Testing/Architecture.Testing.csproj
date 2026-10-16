@@ -5,18 +5,26 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The trace receiver is a small web endpoint inside the test process. -->
+    <!-- The OTLP forwarding endpoint runs inside the test process. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Qyl.Orchestration" Version="13.1.0" />
+    <PackageReference Include="Qyl.Api.Contracts" Version="12.1.2" />
+    <PackageDownload Include="qyl.$(NETCoreSdkRuntimeIdentifier)" Version="[$(QylPlatformVersion)]" />
     <PackageReference Include="MSTest.TestFramework" Version="4.5.1" />
     <PackageReference Include="MSTest.Analyzers" Version="4.5.1" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Checkout.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="$(NuGetPackageRoot)qyl.$(NETCoreSdkRuntimeIdentifier)/$(QylPlatformVersion)/tools/net10.0/$(NETCoreSdkRuntimeIdentifier)/collector/**/*"
+             Link="qyl/collector/%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

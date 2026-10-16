@@ -24,6 +24,7 @@ public sealed class RecorderTests(TestContext testContext)
         {
             await SpanRecorder.StopAsync();
             _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.ReceiverAddress);
+            _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.Collector);
             _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.Begin("not-listening"));
         }
         finally
@@ -129,12 +130,17 @@ public sealed class RecorderTests(TestContext testContext)
         Assert.AreEqual(new Uri("http://127.0.0.1:43210"), TraceReceiver.BoundAddress(features));
     }
 
-    /// <summary>Trace exports are decoded; empty traces, metrics and logs return OTLP responses.</summary>
+    /// <summary>Trace exports are decoded and every signal is forwarded to qyl.</summary>
     [TestMethod]
     public async Task ReceiverAcceptsAllExportRoutes()
     {
         var received = new ConcurrentQueue<Span>();
-        await using var receiver = await TraceReceiver.StartAsync(received.Enqueue);
+        var forwarded = new ConcurrentQueue<byte[]>();
+        await using var receiver = await TraceReceiver.StartAsync(received.Enqueue, (_, payload, _) =>
+        {
+            forwarded.Enqueue(payload.ToArray());
+            return Task.CompletedTask;
+        });
         foreach (var route in new[] { "/v1/traces", "/v1/metrics", "/v1/logs" })
         {
             using var empty = new ByteArrayContent([]);
@@ -148,6 +154,8 @@ public sealed class RecorderTests(TestContext testContext)
         using var export = await Client.PostAsync(new Uri(receiver.Address, "/v1/traces"), content, testContext.CancellationToken);
         Assert.AreEqual(HttpStatusCode.OK, export.StatusCode);
         Assert.AreSequenceEqual(["first", "second"], received.Select(span => span.Name));
+        Assert.HasCount(4, forwarded);
+        Assert.AreSequenceEqual(await content.ReadAsByteArrayAsync(testContext.CancellationToken), forwarded.Last());
         using var malformed = new ByteArrayContent([0x0b]);
         using var rejected = await Client.PostAsync(new Uri(receiver.Address, "/v1/traces"), malformed, testContext.CancellationToken);
         Assert.AreEqual(HttpStatusCode.InternalServerError, rejected.StatusCode);
@@ -163,7 +171,7 @@ public sealed class RecorderTests(TestContext testContext)
         try
         {
             Environment.SetEnvironmentVariable(setting, "invalid-listener-address");
-            _ = await Assert.ThrowsAsync<FormatException>(() => TraceReceiver.StartAsync(_ => { }));
+            _ = await Assert.ThrowsAsync<FormatException>(() => TraceReceiver.StartAsync(_ => { }, (_, _, _) => Task.CompletedTask));
         }
         finally
         {

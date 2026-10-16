@@ -2,7 +2,9 @@
 
 The prototype runs Orders and Payments as separate .NET processes. MSTest architecture
 attributes select the services and decide whether their stores are independent or shared.
-The assertions inspect the spans that those processes actually export over OTLP/HTTP.
+Architecture assertions inspect the spans those processes export over OTLP/HTTP.
+The same exports reach an isolated qyl collector, where tests query persisted logs
+and metrics through the platform's API.
 
 ```csharp
 [Microservices]
@@ -12,11 +14,13 @@ public sealed class CheckoutTests
 {
     // SystemUnderTest.Current.Client<Orders.Api.EntryPoint>() reaches the running service.
     // SystemUnderTest.Current.TraceAsync() returns the test's exported trace.
+    // SystemUnderTest.Current.Telemetry queries the qyl collector.
 }
 ```
 
-The tests use MSTest SDK 4.5.1, Microsoft.Testing.Platform 2.5.1 and Microsoft
-coverage 18.12.0.
+The tests use MSTest SDK 4.5.1, Microsoft.Testing.Platform 2.5.1, Microsoft
+coverage 18.12.0 and qyl 13.2.0. Restore downloads the published qyl runtime for
+the SDK's operating system and architecture; no sibling checkout is needed.
 
 Run the tests, coverage gate and inspections with the .NET SDK pinned in
 `global.json` and globally installed DotCov 4.7.0 or later:
@@ -26,7 +30,7 @@ Run the tests, coverage gate and inspections with the .NET SDK pinned in
 ```
 
 The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, then builds
-the test project and its references in the selected configuration. It runs all 76
+the test project and its references in the selected configuration. It runs all 88
 tests through global `dotcov`, requires 100% line and branch coverage, and runs
 InspectCode against their build outputs. It fails on
 test failures, coverage below either threshold, or inspection warnings, errors or
@@ -50,8 +54,10 @@ stop the child processes. Only the selected services are launched.
 `Qyl.Telemetry.Hosting` 25.0.3 supplies `builder.AddQyl()`, automatic HTTP instrumentation
 and OTLP export. Its transitive SemanticConventions 10.0.1 package supplies `Spans.DbClient`
 for the simulated in-memory store writes. Tests receive telemetry on an isolated local
-endpoint, with a short export interval and sampling enabled. No external collector or
-database is needed. The stores demonstrate ownership through spans; they are not persistent
+endpoint, with a short export interval and sampling enabled. The harness forwards all three
+signals to the published qyl collector and keeps its DuckDB database and output under
+`qyl-data/<run>` beside the test assembly. Each collector uses its own loopback port
+and database. The stores demonstrate ownership through spans; they are not persistent
 databases.
 
 The package's `qyl-telemetry` guide documents the orchestrator integration and the
@@ -77,6 +83,37 @@ MSTest process and checks its exit code and TRX diagnostic, including preservati
 original assertion failure. The probe project is built by the test project; it is not a
 standalone passing suite.
 
+## Logs and metrics
+
+The service applications use `AddQyl()` for all three signals. They emit structured
+application logs through `ILogger`; qyl also records HTTP metrics automatically.
+The harness stops and joins the collector during assembly cleanup.
+
+`TraceAsync()` returns a trace with a public `Id`. Use that ID to read its logs:
+
+```csharp
+var system = SystemUnderTest.Current;
+var trace = await system.TraceAsync(cancellationToken);
+var logs = await system.Telemetry.LogsAsync(trace.Id, cancellationToken);
+```
+
+Log queries follow every continuation page and retain severity, body, attributes,
+resource and trace identity from `Qyl.Api.Contracts`. HTTP errors, invalid cursors
+and incomplete OTLP acknowledgements fail visibly.
+
+Metrics describe an aggregation window, not one request. Query a metric name with
+an explicit start, end and aggregation:
+
+```csharp
+var metrics = await system.Telemetry.QueryMetricAsync(
+    "http.server.request.duration", start, end,
+    MetricAggregation.Count, cancellationToken);
+```
+
+The result retains qyl's units, series, buckets and truncation flag. Export and
+persistence are asynchronous: an early read can be empty. The integration tests
+wait for actual log records or nonempty metric values with a bounded deadline.
+
 ## Coverage
 
 Use DotCov 4.7.0 or later. `dotcov test` flushes pending Microsoft coverage counters
@@ -87,12 +124,12 @@ must reach 100%; `./build.sh` enforces these thresholds without coverage exclusi
 ```sh
 mkdir -p artifacts
 dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 100 --min-branch 100 --format json -- \
-  -c Release --minimum-expected-tests 76 --report-trx \
+  -c Release --minimum-expected-tests 88 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
   > artifacts/coverage.json 2> artifacts/coverage.stderr
 ```
 
 DotCov writes each run's XML, test results and log into a fresh `TestResults/<run>`
 directory, named on stderr. Keep these with the JSON and diagnostics. All three
-assemblies and all 14 tracked C# source files should appear. Uncovered lines and
+assemblies and all 16 production C# source files should appear. Uncovered lines and
 partial branches identify behavior the tests have not exercised.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.9.0
+
+- Forward traces, metrics and logs to an isolated, published qyl 13.2.0 collector.
+  Keep its database and output for inspection and stop it with the test run.
+- Add typed qyl queries for trace-correlated logs and time-windowed metric buckets.
+  Preserve pagination, units, aggregation and query failures.
+- Exercise real structured application logs and qyl's automatic HTTP metrics,
+  plus collector startup, cancellation, disposal and query failure cases.
+
 ## 4.8.3
 
 - Build the test project directly so its child probes use the selected configuration

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Architecture.Testing;
 
-/// <summary>Receives the spans the services export over OTLP/HTTP, inside the test process.</summary>
+/// <summary>Records exported spans for architecture checks and forwards every OTLP signal to qyl.</summary>
 internal sealed class TraceReceiver : IAsyncDisposable
 {
     private readonly WebApplication _app;
@@ -23,37 +23,38 @@ internal sealed class TraceReceiver : IAsyncDisposable
     /// <summary>The address the services export to.</summary>
     public Uri Address { get; }
 
-    public static async Task<TraceReceiver> StartAsync(Action<Span> record)
+    public static async Task<TraceReceiver> StartAsync(Action<Span> record,
+        Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> export)
     {
         var builder = WebApplication.CreateSlimBuilder();
         _ = builder.Logging.ClearProviders();
         _ = builder.WebHost.UseUrls("http://127.0.0.1:0");
 
         var app = builder.Build();
-        _ = app.MapPost("/v1/traces", async (HttpRequest request) =>
+        string[] routes = ["/v1/traces", "/v1/metrics", "/v1/logs"];
+        foreach (var route in routes)
         {
-            using var body = new MemoryStream();
-            await request.Body.CopyToAsync(body).ConfigureAwait(false);
-            foreach (var span in OtlpTraces.Decode(body.ToArray()))
+            _ = app.MapPost(route, async (HttpRequest request, CancellationToken cancellationToken) =>
             {
-                record(span);
-            }
+                using var body = new MemoryStream();
+                await request.Body.CopyToAsync(body, cancellationToken).ConfigureAwait(false);
+                var payload = body.ToArray();
+                if (route == "/v1/traces")
+                {
+                    foreach (var span in OtlpTraces.Decode(payload))
+                    {
+                        record(span);
+                    }
+                }
 
-            return Results.Bytes([], "application/x-protobuf");
-        });
-
-        // Metrics and logs are accepted and dropped, so the services do not log failed exports.
-        string[] ignoredExports = ["/v1/metrics", "/v1/logs"];
-        foreach (var route in ignoredExports)
-        {
-            _ = app.MapPost(route, AcceptExport);
+                await export(route, payload, cancellationToken).ConfigureAwait(false);
+                return Results.Bytes([], "application/x-protobuf");
+            });
         }
 
         await app.StartAsync().ConfigureAwait(false);
         var address = BoundAddress(app.Services.GetRequiredService<IServer>().Features);
         return new TraceReceiver(app, address);
-
-        static IResult AcceptExport() => Results.Bytes([], "application/x-protobuf");
     }
 
     internal static Uri BoundAddress(IFeatureCollection features)

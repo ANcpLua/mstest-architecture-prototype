@@ -17,6 +17,8 @@ var app = builder.Build();
 
 // The store this service writes to. The architecture attribute decides whether it is shared.
 var store = new Store(app.Configuration["STORE"] ?? "none");
+var logCreated = LoggerMessage.Define<string>(LogLevel.Information, new EventId(1001, "OrderCreated"),
+    "Order {OrderId} created");
 
 app.MapGet("/health", () => Environment.ProcessId);
 app.MapGet("/store", () => store.Name);
@@ -29,6 +31,8 @@ app.MapPost("/orders", async (PlaceOrder order, IHttpClientFactory clients) =>
     _ = response.EnsureSuccessStatusCode();
     var receipt = await response.Content.ReadFromJsonAsync<Receipt>()
         ?? throw new InvalidOperationException("The payments service returned no receipt.");
+
+    logCreated(app.Logger, id, null);
 
     return Results.Created($"/orders/{id}", new Order(id, order.Amount, store.Name, receipt.Store));
 });

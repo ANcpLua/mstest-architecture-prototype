@@ -11,12 +11,15 @@ var app = builder.Build();
 
 // The store this service writes to. The architecture attribute decides whether it is shared.
 var store = new Store(app.Configuration["STORE"] ?? "none");
+var logCharged = LoggerMessage.Define<string>(LogLevel.Information, new EventId(1002, "PaymentCharged"),
+    "Payment for order {OrderId} charged");
 
 app.MapGet("/health", () => Environment.ProcessId);
 app.MapGet("/store", () => store.Name);
 app.MapPost("/charge", (Charge charge) =>
 {
     store.Write("charge");
+    logCharged(app.Logger, charge.OrderId, null);
     return new Receipt(charge.OrderId, charge.Amount, store.Name);
 });
 

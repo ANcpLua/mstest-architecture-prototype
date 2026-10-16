@@ -16,6 +16,7 @@ internal static class SpanRecorder
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static ActivityListener? _listener;
     private static TraceReceiver? _receiver;
+    private static QylCollector? _collector;
 
     /// <summary>How many spans each source produced in this process, inside a test or not.</summary>
     public static IReadOnlyDictionary<string, int> Sources => SpansPerSource;
@@ -23,6 +24,9 @@ internal static class SpanRecorder
     /// <summary>The address the services export their spans to.</summary>
     public static Uri ReceiverAddress =>
         _receiver?.Address ?? throw new InvalidOperationException("The trace receiver is not running.");
+
+    public static QylCollector Collector =>
+        _collector ?? throw new InvalidOperationException("The qyl collector is not running.");
 
     public static async Task StartAsync()
     {
@@ -40,7 +44,8 @@ internal static class SpanRecorder
                 ActivitySource.AddActivityListener(_listener);
             }
 
-            _receiver ??= await TraceReceiver.StartAsync(Record).ConfigureAwait(false);
+            _collector ??= await QylCollector.StartAsync(Path.Combine(AppContext.BaseDirectory, "qyl", "collector", "qyl.collector.dll")).ConfigureAwait(false);
+            _receiver ??= await TraceReceiver.StartAsync(Record, _collector.Telemetry.ExportAsync).ConfigureAwait(false);
         }
         finally
         {
@@ -61,6 +66,11 @@ internal static class SpanRecorder
 
             _listener?.Dispose();
             _listener = null;
+            if (_collector is not null)
+            {
+                await _collector.DisposeAsync().ConfigureAwait(false);
+                _collector = null;
+            }
         }
         finally
         {

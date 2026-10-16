@@ -27,6 +27,16 @@ public sealed class RunningSystem : IAsyncDisposable
     /// <summary>The names of the running bricks.</summary>
     public IReadOnlyList<string> Bricks { get; }
 
+    /// <summary>The qyl platform query client for the current test run.</summary>
+    public QylTelemetry Telemetry
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return SpanRecorder.Collector.Telemetry;
+        }
+    }
+
     /// <summary>Waits until the services have exported what the test caused so far, then returns the trace.</summary>
     public Task<TestTrace> TraceAsync(CancellationToken cancellationToken = default)
     {
@@ -132,7 +142,9 @@ public sealed class RunningSystem : IAsyncDisposable
             .WithEnvironment("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
             .WithEnvironment("OTEL_TRACES_SAMPLER", "always_on")
             .WithEnvironment("OTEL_BSP_SCHEDULE_DELAY", "200")
-            .WithEnvironment("Logging__LogLevel__Default", "Warning")
+            .WithEnvironment("OTEL_BLRP_SCHEDULE_DELAY", "200")
+            .WithEnvironment("OTEL_METRIC_EXPORT_INTERVAL", "200")
+            .WithEnvironment("Logging__LogLevel__Default", "Information")
             .WithHealthCheck(requireProcessId: true)).ToArray();
         foreach (var service in services)
         {

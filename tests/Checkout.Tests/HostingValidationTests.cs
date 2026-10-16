@@ -69,6 +69,7 @@ public sealed class HostingValidationTests(TestContext testContext)
 
         await system.DisposeAsync();
         _ = Assert.ThrowsExactly<ObjectDisposedException>(() => system.TraceAsync(testContext.CancellationToken));
+        _ = Assert.ThrowsExactly<ObjectDisposedException>(() => system.Telemetry);
     }
 
     /// <summary>A cached failed startup does not prevent cleanup of a healthy cached process.</summary>

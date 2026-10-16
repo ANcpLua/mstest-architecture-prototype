@@ -40,7 +40,7 @@ public sealed class TestTrace
     }
 
     /// <summary>The trace id, as 32 hex characters.</summary>
-    private string Id { get; }
+    public string Id { get; }
 
     /// <summary>Every span of the trace, in the order it was recorded.</summary>
     public IReadOnlyList<Span> Spans { get; }
