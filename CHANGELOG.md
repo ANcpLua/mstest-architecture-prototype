@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.0.1
+
+- Export the test host's spans through qyl so persisted traces include the HTTP
+  client parent and completed test root, not only the service spans.
+- Stamp telemetry with the release version instead of the default `1.0.0`.
+- Check persisted parent links and service versions in regression tests.
+- Keep telemetry enabled in the API failure cases and require their error spans
+  and error logs to reach qyl.
+
 ## 5.0.0
 
 - Promote the qyl metrics and logs integration to stable after the 4.9.0 release

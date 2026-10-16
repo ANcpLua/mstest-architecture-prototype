@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Qyl;
 
 namespace Architecture.Testing;
 
@@ -10,7 +11,6 @@ namespace Architecture.Testing;
 internal static class SpanRecorder
 {
     private const string NoParent = "0000000000000000";
-    private static readonly ActivitySource Source = new("Architecture.Testing");
     private static readonly ConcurrentDictionary<string, ConcurrentQueue<Span>> Traces = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, int> SpansPerSource = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim Gate = new(1, 1);
@@ -45,7 +45,7 @@ internal static class SpanRecorder
             }
 
             _collector ??= await QylCollector.StartAsync(Path.Combine(AppContext.BaseDirectory, "qyl", "collector", "qyl.collector.dll")).ConfigureAwait(false);
-            _receiver ??= await TraceReceiver.StartAsync(Record, _collector.Telemetry.ExportAsync).ConfigureAwait(false);
+            _receiver ??= await TraceReceiver.StartAsync(Record, _collector.Telemetry.ExportAsync, _collector.Address).ConfigureAwait(false);
         }
         finally
         {
@@ -80,8 +80,9 @@ internal static class SpanRecorder
 
     public static Activity Begin(string testName)
     {
-        var root = Source.StartActivity($"test {testName}", ActivityKind.Internal, parentContext: default)
+        var root = Spans.Work("architecture.test")
             ?? throw new InvalidOperationException("The span recorder is not listening.");
+        _ = root.SetAppTag("test.name", testName);
         Traces[root.TraceId.ToHexString()] = new ConcurrentQueue<Span>();
         return root;
     }

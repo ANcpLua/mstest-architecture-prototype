@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="Qyl.Orchestration" Version="13.1.0" />
+    <PackageReference Include="Qyl.Telemetry.Hosting" Version="$(QylTelemetryVersion)" />
     <PackageReference Include="Qyl.Api.Contracts" Version="12.1.2" />
     <PackageDownload Include="qyl.$(NETCoreSdkRuntimeIdentifier)" Version="[$(QylPlatformVersion)]" />
     <PackageReference Include="MSTest.TestFramework" Version="4.5.1" />

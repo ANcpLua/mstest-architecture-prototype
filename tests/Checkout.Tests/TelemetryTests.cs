@@ -28,6 +28,9 @@ public sealed class TelemetryTests(TestContext testContext)
         Assert.Contains(log => log.Body is AttributeValue.StringValue body && body.Value.Contains(order.Id, StringComparison.Ordinal), logs);
         Assert.Contains(log => JsonSerializer.Serialize(log).Contains("OrderCreated", StringComparison.Ordinal), logs);
         Assert.Contains(log => JsonSerializer.Serialize(log).Contains("PaymentCharged", StringComparison.Ordinal), logs);
+        var version = typeof(OrdersApi).Assembly.GetName().Version!.ToString(3);
+        Assert.IsTrue(logs.All(log => log.Resource.Attributes!.Any(attribute => attribute is
+        { Key: "service.version", Value: AttributeValue.StringValue value } && value.Value.Split('+')[0] == version)));
         testContext.WriteLine(JsonSerializer.Serialize(logs));
     }
 

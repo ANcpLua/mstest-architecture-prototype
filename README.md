@@ -30,7 +30,7 @@ Run the tests, coverage gate and inspections with the .NET SDK pinned in
 ```
 
 The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, then builds
-the test project and its references in the selected configuration. It runs all 88
+the test project and its references in the selected configuration. It runs all 89
 tests through global `dotcov`, requires 100% line and branch coverage, and runs
 InspectCode against their build outputs. It fails on
 test failures, coverage below either threshold, or inspection warnings, errors or
@@ -57,7 +57,10 @@ for the simulated in-memory store writes. Tests receive telemetry on an isolated
 endpoint, with a short export interval and sampling enabled. The harness forwards all three
 signals to the published qyl collector and keeps its DuckDB database and output under
 `qyl-data/<run>` beside the test assembly. Each collector uses its own loopback port
-and database. The stores demonstrate ownership through spans; they are not persistent
+and database. The test host also uses `AddQyl()` and exports directly to that collector,
+so its HTTP client spans and completed test root are present in the stored trace.
+The `Version` in `Directory.Build.props` supplies the services' `service.version`.
+The stores demonstrate ownership through spans; they are not persistent
 databases.
 
 The package's `qyl-telemetry` guide documents the orchestrator integration and the
@@ -66,7 +69,7 @@ child environment settings used here for the OTLP endpoint and HTTP/protobuf pro
 Aspire's AppHost, SDK and testing package have been removed. `Qyl.Orchestration` contains
 the supervisor shared with the qyl CLI; the prototype has no custom service launcher and
 uses its published NuGet package. No sibling clone or copied orchestration source is needed.
-`qyl-api-schema` describes collector APIs, which this local trace receiver does not call.
+`Qyl.Api.Contracts` supplies the collector query response types used by the harness.
 
 The checkout tests cover microservices, a distributed monolith and a single-service monolith,
 including the exported qyl store spans and the orders-to-payments call. Hosting tests cover
@@ -124,7 +127,7 @@ must reach 100%; `./build.sh` enforces these thresholds without coverage exclusi
 ```sh
 mkdir -p artifacts
 dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 100 --min-branch 100 --format json -- \
-  -c Release --minimum-expected-tests 88 --report-trx \
+  -c Release --minimum-expected-tests 89 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
   > artifacts/coverage.json 2> artifacts/coverage.stderr
 ```

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Architecture.Testing;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http.Features;
@@ -14,6 +16,54 @@ namespace Checkout.Tests;
 public sealed class RecorderTests(TestContext testContext)
 {
     private static readonly HttpClient Client = new();
+
+    /// <summary>The qyl database contains the completed test root and its HTTP client span, with no missing parent.</summary>
+    [TestMethod]
+    public async Task QylStoresCompletedTestRootAndClient()
+    {
+        using var root = SpanRecorder.Begin(nameof(QylStoresCompletedTestRootAndClient));
+        var traceId = root.TraceId.ToHexString();
+        var rootId = root.SpanId.ToHexString();
+        try
+        {
+            using var response = await Client.GetAsync(new Uri(SpanRecorder.Collector.Address, "health"), testContext.CancellationToken);
+            _ = response.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            SpanRecorder.End(root);
+        }
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        JsonElement trace;
+        while (true)
+        {
+            try
+            {
+                trace = await Client.GetFromJsonAsync<JsonElement>(new Uri(SpanRecorder.Collector.Address, $"api/v1/traces/{traceId}"), deadline.Token);
+                if (trace.GetProperty("spans").EnumerateArray().Any(span => span.GetProperty("span_id").GetString() == rootId))
+                {
+                    break;
+                }
+            }
+            catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+            {
+            }
+
+            await Task.Delay(100, deadline.Token);
+        }
+
+        var spans = trace.GetProperty("spans").EnumerateArray().ToArray();
+        var ids = spans.Select(span => span.GetProperty("span_id").GetString()).ToHashSet();
+        Assert.Contains(span => span.GetProperty("span_id").GetString() == rootId
+            && span.GetProperty("name").GetString() == "architecture.test", spans);
+        Assert.Contains(span => span.GetProperty("kind").GetInt32() == (int)System.Diagnostics.ActivityKind.Client + 1
+            && span.GetProperty("parent_span_id").GetString() == rootId, spans);
+        Assert.IsTrue(spans.All(span => !span.TryGetProperty("parent_span_id", out var parent)
+            || parent.GetString() is null or "" || ids.Contains(parent.GetString())));
+        testContext.WriteLine(trace.GetRawText());
+    }
 
     /// <summary>Stopping twice is safe and starting again restores the receiver and listener.</summary>
     [TestMethod]
