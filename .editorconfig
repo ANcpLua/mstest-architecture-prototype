@@ -10,7 +10,7 @@ csharp_style_expression_bodied_local_functions = true:warning
 # Surface enabled analyzer suggestions in the build; warnings already fail it.
 dotnet_analyzer_diagnostic.severity = warning
 
-# MSTest 4.4.1 explicitly assigns suggestion severity to these rules.
+# Keep MSTest's suggested diagnostics visible to the build gate.
 dotnet_diagnostic.MSTEST0001.severity = warning
 dotnet_diagnostic.MSTEST0016.severity = warning
 dotnet_diagnostic.MSTEST0023.severity = warning

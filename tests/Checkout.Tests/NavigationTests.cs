@@ -44,13 +44,17 @@ public sealed class NavigationTests(TestContext testContext)
                     Assert.IsNotNull(original.DeclaringLineNumber);
                     Assert.IsTrue(original.DeclaringLineNumber > 0);
 
-                    var test = discovered.Single(node =>
+                    var tests = discovered.Where(node =>
                         node.GetProperty("type").GetProperty("typeName").GetString() == testClass.Name &&
-                        node.GetProperty("type").GetProperty("methodName").GetString() == method.Name);
-                    var location = test.GetProperty("location");
-                    Assert.AreEqual(original.DeclaringFilePath, location.GetProperty("file").GetString());
-                    Assert.AreEqual(original.DeclaringLineNumber, location.GetProperty("lineStart").GetInt32());
-                    Assert.AreEqual(original.DeclaringLineNumber, location.GetProperty("lineEnd").GetInt32());
+                        node.GetProperty("type").GetProperty("methodName").GetString() == method.Name).ToArray();
+                    Assert.HasCount(Math.Max(1, method.GetCustomAttributes<DataRowAttribute>().Count()), tests);
+                    foreach (var test in tests)
+                    {
+                        var location = test.GetProperty("location");
+                        Assert.AreEqual(original.DeclaringFilePath, location.GetProperty("file").GetString());
+                        Assert.AreEqual(original.DeclaringLineNumber, location.GetProperty("lineStart").GetInt32());
+                        Assert.AreEqual(original.DeclaringLineNumber, location.GetProperty("lineEnd").GetInt32());
+                    }
                 }
             }
         }
@@ -59,6 +63,7 @@ public sealed class NavigationTests(TestContext testContext)
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
             }
         }
     }

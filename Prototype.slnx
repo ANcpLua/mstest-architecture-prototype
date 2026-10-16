@@ -5,6 +5,8 @@
     <Project Path="src/Payments.Api/Payments.Api.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <File Path="tests/Architecture.Probes/Architecture.Probes.csproj" />
+    <File Path="tests/Architecture.Probes/FailureProbes.cs" />
     <Project Path="tests/Checkout.Tests/Checkout.Tests.csproj" />
   </Folder>
 </Solution>

@@ -30,7 +30,7 @@ Run the tests, coverage gate and inspections with the .NET SDK pinned in
 ```
 
 The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, then builds
-the test project and its references in the selected configuration. It runs all 91
+the test project and its references in the selected configuration. It runs all 92
 tests through global `dotcov`, requires 100% line and branch coverage, and runs
 InspectCode against their build outputs. It fails on
 test failures, coverage below either threshold, or inspection warnings, errors or
@@ -74,17 +74,23 @@ uses its published NuGet package. No sibling clone or copied orchestration sourc
 The checkout tests cover microservices, a distributed monolith and a single-service monolith,
 including the exported qyl store spans and the orders-to-payments call. Hosting tests cover
 process isolation, service selection, shutdown, startup cancellation and a missing dependency's
-startup error. A discovery test launches the test runner with `--list-tests json` and checks
-the original file and line for every architecture test. MSTest reads these locations from
-the original `[TestMethod]` during discovery; the execution wrapper does not need to copy
+startup error. Native `[DataRow]` cases verify that each payment invocation receives
+its own trace. A discovery test launches the test runner with `--list-tests json` and checks
+the original file and line for every architecture case, including each data row. MSTest reads
+these locations from the original `[TestMethod]` during discovery; the execution wrapper does not need to copy
 them or suppress a caller-information inspection.
+
+`Architecture.Testing` uses MSTest's `TestClassAttribute`, `TestMethodAttribute.ExecuteAsync`
+and `AssemblyFixtureProvider` extension points. Its wrapper adds architecture verification
+and trace diagnostics while preserving the method attribute's results. MSTest supplies
+data-row execution, duration reporting, discovery and the underlying test outcomes.
 
 Regression tests also cover invalid architecture declarations, store ownership, malformed
 OTLP payloads, receiver startup failure, API fallbacks and payment failures. Three deliberately
 failing cases live in `tests/Architecture.Probes`. The main suite runs each in a separate
 MSTest process and checks its exit code and TRX diagnostic, including preservation of an
-original assertion failure. The probe project is built by the test project; it is not a
-standalone passing suite.
+original assertion failure. The parent project builds the probes and owns their assertions.
+Run `Checkout.Tests` for a passing suite; the solution also lists the probe sources for browsing.
 
 ## Logs and metrics
 
@@ -133,7 +139,7 @@ must reach 100%; `./build.sh` enforces these thresholds without coverage exclusi
 ```sh
 mkdir -p artifacts
 dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 100 --min-branch 100 --format json -- \
-  -c Release --minimum-expected-tests 91 --report-trx \
+  -c Release --minimum-expected-tests 92 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
   > artifacts/coverage.json 2> artifacts/coverage.stderr
 ```

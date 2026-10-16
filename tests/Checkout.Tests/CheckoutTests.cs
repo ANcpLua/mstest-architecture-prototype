@@ -71,17 +71,25 @@ public sealed class CheckoutAsDistributedMonolith(TestContext testContext)
 [Service<PaymentsApi>("payments-api")]
 public sealed class PaymentsAsMonolith(TestContext testContext)
 {
-    /// <summary>A charge is recorded in the single service's store.</summary>
+    /// <summary>Each charge is recorded in the single service's store and its own test trace.</summary>
+    /// <param name="orderId">The order charged by this data row.</param>
+    /// <param name="amount">The amount charged for the order.</param>
     [TestMethod]
-    public async Task ChargeIsWrittenToTheStoreOfTheOneDeployable()
+    [DataRow("first-order", 12.5)]
+    [DataRow("second-order", 25.0)]
+    public async Task ChargeIsWrittenToTheStoreOfTheOneDeployable(string orderId, double amount)
     {
         using var payments = SystemUnderTest.Current.Client<PaymentsApi>();
 
-        using var response = await payments.PostAsJsonAsync("/charge", new { OrderId = "1", Amount = 12.5m }, testContext.CancellationToken);
+        using var response = await payments.PostAsJsonAsync("/charge", new { OrderId = orderId, Amount = (decimal)amount }, testContext.CancellationToken);
         var receipt = await response.Content.ReadFromJsonAsync<Receipt>(testContext.CancellationToken);
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.AreEqual(orderId, receipt?.OrderId);
         Assert.AreEqual("payments-api", receipt?.Store);
+
+        var trace = await SystemUnderTest.Current.TraceAsync(testContext.CancellationToken);
+        Assert.HasCount(1, trace.Spans.Where(span => span.Store is not null));
     }
 }
 
