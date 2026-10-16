@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.0
+
+- Promote the qyl metrics and logs integration to stable after the 4.9.0 release
+  source passes all 88 tests and both 100% coverage gates.
+
 ## 4.9.0
 
 - Forward traces, metrics and logs to an isolated, published qyl 13.2.0 collector.
