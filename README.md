@@ -30,7 +30,7 @@ Run the tests, coverage gate and inspections with the .NET SDK pinned in
 ```
 
 The gate restores the JetBrains tool pinned in `.config/dotnet-tools.json`, then builds
-the test project and its references in the selected configuration. It runs all 89
+the test project and its references in the selected configuration. It runs all 91
 tests through global `dotcov`, requires 100% line and branch coverage, and runs
 InspectCode against their build outputs. It fails on
 test failures, coverage below either threshold, or inspection warnings, errors or
@@ -104,6 +104,12 @@ Log queries follow every continuation page and retain severity, body, attributes
 resource and trace identity from `Qyl.Api.Contracts`. HTTP errors, invalid cursors
 and incomplete OTLP acknowledgements fail visibly.
 
+The receiver records exported spans only after qyl accepts the export. Malformed
+trace protobuf receives HTTP 400 with the decoder's diagnostic in a protobuf status
+message. Startup probes and deliberately failed requests remain in telemetry;
+[the v5.0.1 error audit](docs/telemetry-errors.md) explains their causes and the
+receiver defects corrected in v5.0.2.
+
 Metrics describe an aggregation window, not one request. Query a metric name with
 an explicit start, end and aggregation:
 
@@ -127,7 +133,7 @@ must reach 100%; `./build.sh` enforces these thresholds without coverage exclusi
 ```sh
 mkdir -p artifacts
 dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 100 --min-branch 100 --format json -- \
-  -c Release --minimum-expected-tests 89 --report-trx \
+  -c Release --minimum-expected-tests 91 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
   > artifacts/coverage.json 2> artifacts/coverage.stderr
 ```

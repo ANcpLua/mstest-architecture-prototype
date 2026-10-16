@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -43,20 +44,31 @@ internal sealed class TraceReceiver : IAsyncDisposable
         string[] routes = ["/v1/traces", "/v1/metrics", "/v1/logs"];
         foreach (var route in routes)
         {
-            _ = app.MapPost(route, async (HttpRequest request, CancellationToken cancellationToken) =>
+            _ = app.MapPost(route, async (HttpRequest request, HttpResponse response, CancellationToken cancellationToken) =>
             {
                 using var body = new MemoryStream();
                 await request.Body.CopyToAsync(body, cancellationToken).ConfigureAwait(false);
                 var payload = body.ToArray();
+                var spans = new List<Span>();
                 if (route == "/v1/traces")
                 {
-                    foreach (var span in OtlpTraces.Decode(payload))
+                    try
                     {
-                        record(span);
+                        spans = OtlpTraces.Decode(payload);
+                    }
+                    catch (InvalidDataException error)
+                    {
+                        response.StatusCode = StatusCodes.Status400BadRequest;
+                        return Results.Bytes(ErrorStatus(error.Message), "application/x-protobuf");
                     }
                 }
 
                 await export(route, payload, cancellationToken).ConfigureAwait(false);
+                foreach (var span in spans)
+                {
+                    record(span);
+                }
+
                 return Results.Bytes([], "application/x-protobuf");
             });
         }
@@ -64,6 +76,16 @@ internal sealed class TraceReceiver : IAsyncDisposable
         await app.StartAsync().ConfigureAwait(false);
         var address = BoundAddress(app.Services.GetRequiredService<IServer>().Features);
         return new TraceReceiver(app, address);
+    }
+
+    private static byte[] ErrorStatus(string message)
+    {
+        using var output = new MemoryStream();
+        using var writer = new BinaryWriter(output, Encoding.UTF8);
+        writer.Write((byte)0x12); // google.rpc.Status.message: field 2, length-delimited.
+        writer.Write(message);
+        writer.Flush();
+        return output.ToArray();
     }
 
     internal static Uri BoundAddress(IFeatureCollection features)

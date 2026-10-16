@@ -208,8 +208,35 @@ public sealed class RecorderTests(TestContext testContext)
         Assert.AreSequenceEqual(await content.ReadAsByteArrayAsync(testContext.CancellationToken), forwarded.Last());
         using var malformed = new ByteArrayContent([0x0b]);
         using var rejected = await Client.PostAsync(new Uri(receiver.Address, "/v1/traces"), malformed, testContext.CancellationToken);
-        Assert.AreEqual(HttpStatusCode.InternalServerError, rejected.StatusCode);
+        Assert.AreEqual(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.AreEqual("application/x-protobuf", rejected.Content.Headers.ContentType?.MediaType);
+        var diagnostic = "Unsupported protobuf wire type 3 at byte 1."u8.ToArray();
+        Assert.AreSequenceEqual(new byte[] { 0x12, (byte)diagnostic.Length }.Concat(diagnostic),
+            await rejected.Content.ReadAsByteArrayAsync(testContext.CancellationToken));
         Assert.HasCount(2, received);
+        Assert.HasCount(4, forwarded);
+    }
+
+    /// <summary>A failed or partial qyl export stays a server error and cannot satisfy local architecture assertions.</summary>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ReceiverDoesNotRecordUnpersistedSpans(bool partialAcceptance)
+    {
+        var received = new ConcurrentQueue<Span>();
+        var attempts = 0;
+        await using var receiver = await TraceReceiver.StartAsync(received.Enqueue, (_, _, _) =>
+        {
+            attempts++;
+            return Task.FromException(partialAcceptance
+                ? new InvalidDataException("qyl partially accepted the export.")
+                : new HttpRequestException("qyl export failed."));
+        });
+        using var content = new ByteArrayContent(OtlpFixture.Export("service", "scope", OtlpFixture.Text(5, "unpersisted")));
+        using var response = await Client.PostAsync(new Uri(receiver.Address, "/v1/traces"), content, testContext.CancellationToken);
+        Assert.AreEqual(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.AreEqual(1, attempts);
+        Assert.IsEmpty(received);
     }
 
     /// <summary>A malformed Kestrel endpoint remains a startup error instead of a ready receiver.</summary>

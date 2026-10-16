@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.0.2
+
+- Return HTTP 400 and a protobuf diagnostic for malformed trace exports instead
+  of reporting them as server failures.
+- Record forwarded spans only after qyl accepts their export. Failed and partial
+  exports cannot satisfy local architecture assertions.
+- Add regression tests for both forwarding failures and document the v5.0.1 error
+  records without filtering startup probes or deliberate application failures.
+
 ## 5.0.1
 
 - Export the test host's spans through qyl so persisted traces include the HTTP

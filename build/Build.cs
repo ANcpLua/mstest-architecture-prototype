@@ -48,7 +48,7 @@ sealed class Build : FalloutBuild
             // Microsoft.Testing.Platform, as selected in global.json
             ProcessTasks.StartProcess(
                     ToolPathResolver.GetPathExecutable("dotcov"),
-                    $"test \"{TestProject}\" --min-line 100 --min-branch 100 -- -c {_configuration} --no-build --no-restore --minimum-expected-tests 89 --report-trx --coverage-settings \"{RootDirectory / "coverage.config"}\" --coverage-output coverage.cobertura.xml",
+                    $"test \"{TestProject}\" --min-line 100 --min-branch 100 -- -c {_configuration} --no-build --no-restore --minimum-expected-tests 91 --report-trx --coverage-settings \"{RootDirectory / "coverage.config"}\" --coverage-output coverage.cobertura.xml",
                     RootDirectory)
                 .AssertZeroExitCode();
         });
