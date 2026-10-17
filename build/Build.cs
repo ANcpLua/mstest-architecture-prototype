@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -54,26 +55,44 @@ sealed class Build : FalloutBuild
         .Executes(() =>
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_minimumExpectedTests);
-            if (_testFilter?.Any(character => character is '"' or '\r' or '\n') == true)
-                throw new ArgumentException("The test filter cannot contain quotes or line breaks.", nameof(_testFilter));
-            var filter = string.IsNullOrWhiteSpace(_testFilter) ? "" : $" --filter \"{_testFilter}\"";
             // Native test outcomes gate business invariants. Keep the coverage report without
             // the blanket library percentage gate removed by the owner on 2026-10-16.
             var reportPath = RootDirectory / "artifacts" / "coverage.json";
             reportPath.Parent.CreateDirectory();
-            var process = ProcessTasks.StartProcess(
-                    ToolPathResolver.GetPathExecutable("dotcov"),
-                    $"test \"{TestProject}\" --min-line 0 --min-branch 0 --format json -- -c {_configuration} --no-build --no-restore --minimum-expected-tests {_minimumExpectedTests}{filter} --report-trx --coverage-settings \"{RootDirectory / "coverage.config"}\" --coverage-output coverage.cobertura.xml",
-                    RootDirectory, logOutput: false);
+            var start = new ProcessStartInfo(ToolPathResolver.GetPathExecutable("dotcov"))
+            {
+                WorkingDirectory = RootDirectory,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            string[] arguments =
+            [
+                "test", TestProject, "--min-line", "0", "--min-branch", "0", "--format", "json",
+                "--", "-c", _configuration.ToString(), "--no-build", "--no-restore",
+                "--minimum-expected-tests", _minimumExpectedTests.ToString(),
+                "--report-trx", "--coverage-settings", RootDirectory / "coverage.config",
+                "--coverage-output", "coverage.cobertura.xml",
+            ];
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
+            if (!string.IsNullOrWhiteSpace(_testFilter))
+            {
+                start.ArgumentList.Add("--filter");
+                start.ArgumentList.Add(_testFilter);
+            }
+            using var process = Process.Start(start)
+                ?? throw new InvalidOperationException("DotCov did not start.");
+            var output = process.StandardOutput.ReadToEndAsync();
+            var diagnostics = process.StandardError.ReadToEndAsync();
             process.WaitForExit();
-            File.WriteAllText(reportPath, string.Join(Environment.NewLine,
-                process.Output.Where(line => line.Type == OutputType.Std).Select(line => line.Text)));
-            var diagnostics = process.Output.Where(line => line.Type == OutputType.Err).Select(line => line.Text).ToArray();
-            File.WriteAllLines(RootDirectory / "artifacts" / "coverage.stderr", diagnostics);
-            foreach (var diagnostic in diagnostics) Console.WriteLine(diagnostic);
+            File.WriteAllText(reportPath, output.GetAwaiter().GetResult());
+            var errors = diagnostics.GetAwaiter().GetResult();
+            File.WriteAllText(RootDirectory / "artifacts" / "coverage.stderr", errors);
+            Console.Write(errors);
             // DotCov returns 4 for a deliberately disabled percentage gate. Failed tests and
             // unreadable reports have different exit codes and must still stop the build.
-            if (process.ExitCode != 4) process.AssertZeroExitCode();
+            if (process.ExitCode is not (0 or 4))
+                throw new InvalidOperationException($"DotCov failed with exit code {process.ExitCode}. See artifacts/coverage.stderr.");
             using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
             var report = document.RootElement;
             var summary = report.GetProperty("summary");
