@@ -117,9 +117,18 @@
           ],
           "description": "Configuration to build - Default is 'Debug' (local) or 'Release' (server)"
         },
+        "MinimumExpectedTests": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Minimum number of tests required for the selected scope"
+        },
         "Solution": {
           "type": "string",
           "description": "Path to a solution file that is automatically loaded"
+        },
+        "TestFilter": {
+          "type": "string",
+          "description": "Native MSTest filter; omit to run every test"
         }
       }
     },
