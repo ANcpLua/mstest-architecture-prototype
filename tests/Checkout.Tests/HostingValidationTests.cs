@@ -10,6 +10,8 @@ namespace Checkout.Tests;
 [TestClass]
 public sealed class HostingValidationTests(TestContext testContext)
 {
+    private ArchitectureRun Run => ArchitectureFixtures.GetRun(testContext);
+
     /// <summary>Names that cannot identify a service fail before launching a process.</summary>
     [TestMethod]
     [DataRow(null)]
@@ -18,7 +20,7 @@ public sealed class HostingValidationTests(TestContext testContext)
     [DataRow("orders:api")]
     public async Task InvalidServiceNamesAreRejected(string? name)
     {
-        var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => RunningSystem.StartAsync(
+        var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => RunningSystem.StartAsync(Run,
             new MonolithAttribute(), [new ServiceAttribute<Payments.Api.EntryPoint>(name!)], testContext.CancellationToken));
         Assert.Contains("nonempty service name without a colon", failure.Message);
     }
@@ -27,7 +29,7 @@ public sealed class HostingValidationTests(TestContext testContext)
     [TestMethod]
     public async Task InvalidArchitectureIsRejected()
     {
-        var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => RunningSystem.StartAsync(
+        var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => RunningSystem.StartAsync(Run,
             new MonolithAttribute(), [], testContext.CancellationToken));
         Assert.Contains("0 bricks", failure.Message);
     }
@@ -41,7 +43,7 @@ public sealed class HostingValidationTests(TestContext testContext)
         BrickAttribute[] bricks = sameName
             ? [new ServiceAttribute<Orders.Api.EntryPoint>("service"), new ServiceAttribute<Payments.Api.EntryPoint>("SERVICE")]
             : [new ServiceAttribute<Payments.Api.EntryPoint>("first"), new ServiceAttribute<Payments.Api.EntryPoint>("second")];
-        var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => RunningSystem.StartAsync(
+        var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => RunningSystem.StartAsync(Run,
             new MicroservicesAttribute(), bricks, testContext.CancellationToken));
         Assert.Contains("exactly one brick", failure.Message);
     }
@@ -51,7 +53,7 @@ public sealed class HostingValidationTests(TestContext testContext)
     public async Task ScopeAndDisposalGuardAccess()
     {
         _ = Assert.ThrowsExactly<InvalidOperationException>(() => SystemUnderTest.Current);
-        var system = await RunningSystem.StartAsync(new MonolithAttribute(),
+        var system = await RunningSystem.StartAsync(Run, new MonolithAttribute(),
             [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")], testContext.CancellationToken);
         await using (system)
         {
@@ -78,26 +80,26 @@ public sealed class HostingValidationTests(TestContext testContext)
     public async Task CachedStartupAndFailureAreBothCleanedUp()
     {
         var bricks = new BrickAttribute[] { new ServiceAttribute<Payments.Api.EntryPoint>("payments-api") };
-        var first = RunningSystem.GetOrStartAsync(typeof(HealthyStartup), new MonolithAttribute(), bricks);
-        var second = RunningSystem.GetOrStartAsync(typeof(HealthyStartup), new MonolithAttribute(), bricks);
-        Assert.AreSame(first, second);
+        var first = Run.GetOrStartAsync(typeof(HealthyStartup), new MonolithAttribute(), bricks, testContext.CancellationToken);
+        var second = Run.GetOrStartAsync(typeof(HealthyStartup), new MonolithAttribute(), bricks, testContext.CancellationToken);
         var system = await first;
+        Assert.AreSame(system, await second);
         using var client = system.Client<Payments.Api.EntryPoint>();
         var processId = await client.GetFromJsonAsync<int>("/health", testContext.CancellationToken);
         using var child = Process.GetProcessById(processId);
         try
         {
-            var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => RunningSystem.GetOrStartAsync(
-                typeof(FailedStartup), new MonolithAttribute(), [new ServiceAttribute<Orders.Api.EntryPoint>("orders-api")]));
+            var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(() => Run.GetOrStartAsync(
+                typeof(FailedStartup), new MonolithAttribute(), [new ServiceAttribute<Orders.Api.EntryPoint>("orders-api")], testContext.CancellationToken));
             Assert.Contains("No address for the payments service was configured.", failure.Message);
         }
         finally
         {
-            await RunningSystem.StopAllAsync();
+            await Run.StopAllAsync();
         }
 
         Assert.IsTrue(child.HasExited);
-        await RunningSystem.StopAllAsync();
+        await Run.StopAllAsync();
     }
 
     /// <summary>Cancellation after startup begins retains cancellation semantics and cleans up.</summary>
@@ -105,7 +107,7 @@ public sealed class HostingValidationTests(TestContext testContext)
     public async Task InFlightStartupCanBeCancelled()
     {
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
-        var start = RunningSystem.StartAsync(new MonolithAttribute(),
+        var start = RunningSystem.StartAsync(Run, new MonolithAttribute(),
             [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")], cancellation.Token);
         await cancellation.CancelAsync();
         var failure = await Assert.ThrowsAsync<OperationCanceledException>(() => start);
@@ -118,7 +120,7 @@ public sealed class HostingValidationTests(TestContext testContext)
     [Timeout(30_000, CooperativeCancellation = true)]
     public async Task BackgroundWorkDoesNotDelayACompleteTrace()
     {
-        await using var system = await RunningSystem.StartAsync(new MonolithAttribute(),
+        await using var system = await RunningSystem.StartAsync(Run, new MonolithAttribute(),
             [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")], testContext.CancellationToken);
         using var scope = system.Enter(nameof(BackgroundWorkDoesNotDelayACompleteTrace));
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
@@ -143,7 +145,8 @@ public sealed class HostingValidationTests(TestContext testContext)
             Assert.AreEqual("payments-api", await client.GetStringAsync("/store", testContext.CancellationToken));
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
             deadline.CancelAfter(TimeSpan.FromSeconds(5));
-            var trace = await scope.SettleAsync(deadline.Token);
+            var trace = await scope.SettleAsync(
+                observed => observed.Spans.Any(span => span.Service == "payments-api"), deadline.Token);
             Assert.Contains(span => span.Name == "continuous-test-work", trace.Spans);
             Assert.Contains(span => span is { Service: "payments-api", ParentSpanId: not null }, trace.Spans);
             Assert.IsFalse(producing.IsCompleted);

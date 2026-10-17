@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Qyl.Orchestration;
 
 namespace Architecture.Testing;
@@ -7,15 +6,17 @@ namespace Architecture.Testing;
 public sealed class RunningSystem : IAsyncDisposable
 {
     private static readonly TimeSpan StartTimeout = TimeSpan.FromMinutes(2);
-    private static readonly ConcurrentDictionary<Type, Lazy<Task<RunningSystem>>> Systems = new();
-    private static readonly AsyncLocal<TestScope?> Test = new();
+    private readonly ArchitectureRun _run;
+    private readonly ArchitectureAttribute _architecture;
     private readonly IReadOnlyList<BrickAttribute> _services;
     private readonly QylApplication _application;
     private bool _disposed;
 
-    private RunningSystem(string kind, IReadOnlyList<BrickAttribute> services, QylApplication application)
+    private RunningSystem(ArchitectureRun run, ArchitectureAttribute architecture, IReadOnlyList<BrickAttribute> services, QylApplication application)
     {
-        Kind = kind;
+        _run = run;
+        _architecture = architecture;
+        Kind = architecture.Kind;
         Bricks = [.. services.Select(service => service.Name)];
         _services = services;
         _application = application;
@@ -35,21 +36,37 @@ public sealed class RunningSystem : IAsyncDisposable
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return SpanRecorder.Collector.Telemetry;
+            return _run.Recorder.Collector.Telemetry;
         }
     }
 
-    /// <summary>Waits until the services have exported what the test caused so far, then returns the trace.</summary>
+    /// <summary>Waits for every declared brick's store evidence and observed HTTP call pairs.</summary>
     public Task<TestTrace> TraceAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return CurrentTest.SettleAsync(cancellationToken);
     }
 
-    internal static RunningSystem Current => CurrentTest.Running;
+    /// <summary>Waits for explicit invocation evidence, including any required logs, events or metrics.</summary>
+    /// <param name="until">The evidence that must be present; metric predicates must select their producer and measurement window.</param>
+    /// <param name="cancellationToken">Cancels the evidence wait.</param>
+    public Task<TestTrace> TraceAsync(Func<TestTrace, bool> until, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(until);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return CurrentTest.SettleAsync(until, cancellationToken);
+    }
 
-    private static TestScope CurrentTest =>
-        Test.Value ?? throw new InvalidOperationException("No test of a class with an architecture attribute is running.");
+    internal ArchitectureVerdict Verify(TestTrace trace) => _architecture.Verify(trace, Bricks);
+
+    private TestScope CurrentTest
+    {
+        get
+        {
+            var scope = TestScope.Current;
+            return scope.Running == this ? scope : throw new InvalidOperationException("This system does not own the current test scope.");
+        }
+    }
 
     /// <summary>A client that talks to one brick.</summary>
     /// <typeparam name="TService">The service type the brick was stacked with.</typeparam>
@@ -73,42 +90,10 @@ public sealed class RunningSystem : IAsyncDisposable
         await _application.DisposeAsync().ConfigureAwait(false);
     }
 
-    internal static Task<RunningSystem> GetOrStartAsync(
-        Type testClass,
-        ArchitectureAttribute architecture,
-        IReadOnlyList<BrickAttribute> bricks) =>
-        Systems.GetOrAdd(testClass, _ => new Lazy<Task<RunningSystem>>(() => StartAsync(architecture, bricks))).Value;
+    internal TestScope Enter(string testName) => new(this, _run.Recorder, testName);
 
-    internal static async Task StopAllAsync()
-    {
-        var systems = Systems.Values.Where(system => system.IsValueCreated).Select(system => system.Value).ToArray();
-        Systems.Clear();
-        await Task.WhenAll(systems.Select(async pending =>
-        {
-            RunningSystem system;
-            try
-            {
-                system = await pending.ConfigureAwait(false);
-            }
-            catch
-            {
-                // StartAsync already disposed every process of a failed startup.
-                return;
-            }
-
-            await system.DisposeAsync().ConfigureAwait(false);
-        })).ConfigureAwait(false);
-    }
-
-    internal TestScope Enter(string testName)
-    {
-        var scope = new TestScope(this, testName, () => Test.Value = null);
-        Test.Value = scope;
-        return scope;
-    }
-
-    internal static async Task<RunningSystem> StartAsync(ArchitectureAttribute architecture, IReadOnlyList<BrickAttribute> bricks,
-        CancellationToken cancellationToken = default)
+    internal static async Task<RunningSystem> StartAsync(ArchitectureRun run, ArchitectureAttribute architecture, IReadOnlyList<BrickAttribute> bricks,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (architecture.Check(bricks) is { } problem)
@@ -127,7 +112,7 @@ public sealed class RunningSystem : IAsyncDisposable
             throw new ArchitectureException("Each service name and service type must identify exactly one brick.");
         }
 
-        await SpanRecorder.StartAsync().ConfigureAwait(false);
+        await run.Recorder.StartAsync(cancellationToken).ConfigureAwait(false);
         var builder = new QylApplicationBuilder
         {
             StartupTimeoutSeconds = (int)StartTimeout.TotalSeconds,
@@ -140,7 +125,7 @@ public sealed class RunningSystem : IAsyncDisposable
             .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithEnvironment("STORE", architecture.StoreOf(brick.Name))
-            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", SpanRecorder.ReceiverAddress.ToString())
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", run.Recorder.ReceiverAddress.ToString())
             .WithEnvironment("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
             .WithEnvironment("OTEL_TRACES_SAMPLER", "always_on")
             .WithEnvironment("OTEL_BSP_SCHEDULE_DELAY", "200")
@@ -164,10 +149,11 @@ public sealed class RunningSystem : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            await application.DisposeAsync().ConfigureAwait(false);
+            try { await application.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException("Service startup and cleanup both failed.", exception, cleanup); }
             if (exception is InvalidOperationException)
             {
-                throw new ArchitectureException(exception.Message);
+                throw new ArchitectureException(exception.Message, exception);
             }
 
             // Forward the original failed task after cleanup, preserving its exception and stack.
@@ -177,7 +163,7 @@ public sealed class RunningSystem : IAsyncDisposable
         async Task<RunningSystem> StartApplicationAsync()
         {
             await application.StartAsync(cancellationToken).ConfigureAwait(false);
-            return new RunningSystem(architecture.Kind, bricks, application);
+            return new RunningSystem(run, architecture, bricks, application);
         }
     }
 }
@@ -186,5 +172,5 @@ public sealed class RunningSystem : IAsyncDisposable
 public static class SystemUnderTest
 {
     /// <summary>The system of the test that is running.</summary>
-    public static RunningSystem Current => RunningSystem.Current;
+    public static RunningSystem Current => TestScope.Current.Running;
 }

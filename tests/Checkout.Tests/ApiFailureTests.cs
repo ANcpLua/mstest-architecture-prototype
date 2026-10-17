@@ -15,6 +15,12 @@ namespace Checkout.Tests;
 [TestClass]
 public sealed class ApiFailureTests(TestContext testContext)
 {
+    private SpanRecorder Recorder => ArchitectureFixtures.GetRun(testContext).Recorder;
+
+    /// <summary>Starts telemetry only for tests that explicitly exercise the recorder.</summary>
+    [TestInitialize]
+    public Task StartRecorder() => Recorder.StartAsync(testContext.CancellationToken);
+
     private static readonly HttpClient Client = new();
 
     /// <summary>Both APIs expose the documented fallback when no store was supplied by their host.</summary>
@@ -45,7 +51,7 @@ public sealed class ApiFailureTests(TestContext testContext)
     [DataRow(true)]
     public async Task InvalidPaymentResponsesFailTheOrder(bool upstreamError)
     {
-        using var root = SpanRecorder.Begin(nameof(InvalidPaymentResponsesFailTheOrder));
+        using var root = Recorder.Begin(nameof(InvalidPaymentResponsesFailTheOrder));
         try
         {
             var upstreamBuilder = WebApplication.CreateSlimBuilder();
@@ -72,7 +78,7 @@ public sealed class ApiFailureTests(TestContext testContext)
         }
         finally
         {
-            SpanRecorder.End(root);
+            Recorder.End(root);
         }
     }
 
@@ -82,13 +88,13 @@ public sealed class ApiFailureTests(TestContext testContext)
         deadline.CancelAfter(TimeSpan.FromSeconds(20));
         while (true)
         {
-            var logs = await SpanRecorder.Collector.Telemetry.LogsAsync(traceId, deadline.Token);
+            var logs = await Recorder.Collector.Telemetry.LogsAsync(traceId, deadline.Token);
             if (logs.FirstOrDefault(log => (int)log.SeverityNumber >= 17) is { } error)
             {
                 Assert.AreEqual("UnhandledException", error.EventName);
                 try
                 {
-                    var trace = await Client.GetFromJsonAsync<JsonElement>(new Uri(SpanRecorder.Collector.Address, $"api/v1/traces/{traceId}"), deadline.Token);
+                    var trace = await Client.GetFromJsonAsync<JsonElement>(new Uri(Recorder.Collector.Address, $"api/v1/traces/{traceId}"), deadline.Token);
                     if (trace.GetProperty("spans").EnumerateArray().Any(span => span.GetProperty("status").GetProperty("code").GetInt32() == 2))
                     {
                         testContext.WriteLine(trace.GetRawText());
@@ -107,7 +113,7 @@ public sealed class ApiFailureTests(TestContext testContext)
 
     private static QylApplicationBuilder CreateBuilder() => new() { MaxRestarts = 0, StartupTimeoutSeconds = 120 };
 
-    private static QylProcessBuilder AddService(QylApplicationBuilder builder, Type entryPoint, string name) =>
+    private QylProcessBuilder AddService(QylApplicationBuilder builder, Type entryPoint, string name) =>
         builder.AddDotnetService(name, entryPoint.Assembly.Location)
             .WithoutEnvironmentPrefix("OTEL_")
             .WithoutEnvironmentPrefix("QYL_")
@@ -115,7 +121,7 @@ public sealed class ApiFailureTests(TestContext testContext)
             .WithoutEnvironmentPrefix("STORE")
             .WithEnvironment("DOTNET_ENVIRONMENT", "Development")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
-            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", SpanRecorder.ReceiverAddress.ToString())
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", Recorder.ReceiverAddress.ToString())
             .WithEnvironment("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
             .WithEnvironment("OTEL_BSP_SCHEDULE_DELAY", "200")
             .WithEnvironment("OTEL_BLRP_SCHEDULE_DELAY", "200")

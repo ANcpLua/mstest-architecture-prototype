@@ -15,35 +15,36 @@ using SpanKind = Qyl.Telemetry.SemanticConventions.SpanKind;
 namespace Architecture.Testing;
 
 /// <summary>Owns the canonical OTLP capture, the published Collector and the test process's SDK.</summary>
-internal static class SpanRecorder
+internal sealed class SpanRecorder : IAsyncDisposable
 {
     public const string TestProcess = "test";
-    private static readonly SemaphoreSlim Gate = new(1, 1);
-    private static readonly ConcurrentQueue<string> Evidence = new();
-    private static readonly JsonSerializerOptions EvidenceJson = new()
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ConcurrentQueue<string> _evidence = new();
+    private readonly JsonSerializerOptions _evidenceJson = new()
     {
         WriteIndented = true,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
-    private static TelemetrySnapshot _lastCapture = new([], [], [], []);
-    private static OtlpReceiver? _capture;
-    private static TraceReceiver? _receiver;
-    private static QylCollector? _collector;
-    private static TracerProvider? _provider;
+    private TelemetrySnapshot _lastCapture = new([], [], [], []);
+    private OtlpReceiver? _capture;
+    private TraceReceiver? _receiver;
+    private QylCollector? _collector;
+    private TracerProvider? _provider;
+    private int _disposed;
 
-    private static TelemetrySnapshot Capture => _capture?.Snapshot() ?? _lastCapture;
-    public static IReadOnlyList<string> EvidenceFiles => [.. Evidence];
-    public static IReadOnlyDictionary<string, int> Sources => Capture.Spans
+    internal TelemetrySnapshot Capture => _capture?.Snapshot() ?? _lastCapture;
+    public IReadOnlyList<string> EvidenceFiles => [.. _evidence];
+    public IReadOnlyDictionary<string, int> Sources => Capture.Spans
         .GroupBy(span => span.Scope?.Name ?? "<unnamed>", StringComparer.Ordinal)
         .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-    public static Uri ReceiverAddress => _receiver?.Address
+    public Uri ReceiverAddress => _receiver?.Address
         ?? throw new InvalidOperationException("The trace receiver is not running.");
-    public static QylCollector Collector => _collector
+    public QylCollector Collector => _collector
         ?? throw new InvalidOperationException("The qyl collector is not running.");
 
-    public static async Task StartAsync()
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await Gate.WaitAsync().ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_provider is not null)
@@ -53,9 +54,9 @@ internal static class SpanRecorder
 
             try
             {
-                _collector = await QylCollector.StartAsync(Path.Combine(AppContext.BaseDirectory, "qyl", "collector", "qyl.collector.dll")).ConfigureAwait(false);
-                _capture = await OtlpReceiver.StartAsync().ConfigureAwait(false);
-                _receiver = await TraceReceiver.StartAsync(_capture, _collector.Telemetry).ConfigureAwait(false);
+                _collector = await QylCollector.StartAsync(Path.Combine(AppContext.BaseDirectory, "qyl", "collector", "qyl.collector.dll"), cancellationToken).ConfigureAwait(false);
+                _capture = await OtlpReceiver.StartAsync(cancellationToken).ConfigureAwait(false);
+                _receiver = await TraceReceiver.StartAsync(_capture, _collector.Telemetry, cancellationToken).ConfigureAwait(false);
                 _provider = Sdk.CreateTracerProviderBuilder()
                     .SetSampler(new AlwaysOnSampler())
                     .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(TestProcess,
@@ -81,90 +82,96 @@ internal static class SpanRecorder
         }
         finally
         {
-            _ = Gate.Release();
+            _ = _gate.Release();
         }
     }
 
-    public static async Task StopAsync()
+    public async Task StopAsync()
     {
-        await Gate.WaitAsync().ConfigureAwait(false);
+        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            try { await RunningSystem.StopAllAsync().ConfigureAwait(false); }
-            finally { await StopCoreAsync().ConfigureAwait(false); }
+            await StopCoreAsync().ConfigureAwait(false);
         }
-        finally { _ = Gate.Release(); }
+        finally { _ = _gate.Release(); }
     }
 
-    private static async Task StopCoreAsync()
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+        try { await StopAsync().ConfigureAwait(false); }
+        finally { _gate.Dispose(); }
+    }
+
+    private async Task StopCoreAsync()
     {
         var provider = _provider; _provider = null;
         var receiver = _receiver; _receiver = null;
         var capture = _capture; _capture = null;
         var collector = _collector; _collector = null;
-        string? deliveryFailure = null;
+        var errors = new List<Exception>();
         try { provider?.Dispose(); }
-        finally
+        catch (Exception error) { errors.Add(error); }
+        if (receiver is not null)
+        {
+            try { await receiver.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { errors.Add(error); }
+        }
+        if (capture is not null)
         {
             try
             {
-                if (receiver is not null)
+                _lastCapture = capture.Snapshot();
+                if (collector is not null)
                 {
-                    await receiver.DisposeAsync().ConfigureAwait(false);
+                    var path = Path.Combine(collector.DataDirectory, "capture.json");
+                    await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+                    {
+                        Capture = _lastCapture,
+                        receiver?.Deliveries
+                    }, _evidenceJson)).ConfigureAwait(false);
+                    _evidence.Enqueue(path);
+                    var deliveries = receiver?.Deliveries ?? [];
+                    if (deliveries.Count != _lastCapture.Requests.Count
+                        || deliveries.Any(delivery => delivery.Failure is not null
+                            || delivery.CollectorStatus is not (>= 200 and < 300)))
+                    {
+                        errors.Add(new InvalidDataException($"Not every captured export completed successfully: {_lastCapture.Requests.Count} captured, {deliveries.Count} delivery records. See {path}."));
+                    }
+                    var sourcesPath = Path.Combine(collector.DataDirectory, "span-sources.txt");
+                    var sources = Sources.OrderBy(source => source.Key, StringComparer.Ordinal)
+                        .Select(source => $"{source.Value,5}  {source.Key}");
+                    await File.WriteAllLinesAsync(sourcesPath, sources).ConfigureAwait(false);
+                    _evidence.Enqueue(sourcesPath);
                 }
             }
-            finally
+            catch (Exception error) { errors.Add(error); }
+            try { await capture.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { errors.Add(error); }
+        }
+        if (collector is not null)
+        {
+            try { await collector.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { errors.Add(error); }
+            foreach (var name in new[] { "shutdown.json", "collector.log" })
             {
-                try
+                var path = Path.Combine(collector.DataDirectory, name);
+                if (File.Exists(path))
                 {
-                    if (capture is not null)
-                    {
-                        _lastCapture = capture.Snapshot();
-                        if (collector is not null)
-                        {
-                            var path = Path.Combine(collector.DataDirectory, "capture.json");
-                            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
-                            {
-                                Capture = _lastCapture,
-                                receiver?.Deliveries
-                            }, EvidenceJson)).ConfigureAwait(false);
-                            Evidence.Enqueue(path);
-                            var deliveries = receiver?.Deliveries ?? [];
-                            if (deliveries.Count != _lastCapture.Requests.Count
-                                || deliveries.Any(delivery => delivery.Failure is not null
-                                    || delivery.CollectorStatus is not (>= 200 and < 300)))
-                            {
-                                deliveryFailure = $"Not every captured export completed successfully: {_lastCapture.Requests.Count} captured, {deliveries.Count} delivery records. See {path}.";
-                            }
-                        }
-                    }
-                }
-                finally
-                {
-                    try
-                    {
-                        if (capture is not null)
-                        {
-                            await capture.DisposeAsync().ConfigureAwait(false);
-                        }
-                    }
-                    finally
-                    {
-                        if (collector is not null)
-                        {
-                            await collector.DisposeAsync().ConfigureAwait(false);
-                        }
-                    }
+                    _evidence.Enqueue(path);
                 }
             }
         }
-        if (deliveryFailure is not null)
+        if (errors.Count > 0)
         {
-            throw new InvalidDataException(deliveryFailure);
+            throw new AggregateException("Telemetry shutdown failed; all owned resources were given a cleanup attempt.", errors);
         }
     }
 
-    public static Activity Begin(string testName)
+    public Activity Begin(string testName)
     {
         if (_provider is null)
         {
@@ -178,15 +185,15 @@ internal static class SpanRecorder
         return root;
     }
 
-    public static IReadOnlyList<SpanRecord> SpansOf(string traceId) =>
+    public IReadOnlyList<SpanRecord> SpansOf(string traceId) =>
         [.. Capture.Spans.Where(span => span.TraceId == traceId)];
 
-    public static Task<TelemetrySnapshot> AwaitAsync(Func<TelemetrySnapshot, bool> until,
+    public Task<TelemetrySnapshot> AwaitAsync(Func<TelemetrySnapshot, bool> until,
         CancellationToken cancellationToken) =>
         (_capture ?? throw new InvalidOperationException("The OTLP capture is not running."))
         .AwaitAsync(until, TimeSpan.FromSeconds(10), cancellationToken);
 
-    public static void Flush()
+    public void Flush()
     {
         if (_provider?.ForceFlush(10_000) != true)
         {
@@ -194,41 +201,74 @@ internal static class SpanRecorder
         }
     }
 
-    public static void End(Activity root)
+    public void End(Activity root)
     {
         root.Stop();
         Flush();
     }
 }
 
-/// <summary>One invocation's root and its evidence from the running system.</summary>
+/// <summary>One invocation's root and the evidence required by its architecture or caller.</summary>
 internal sealed class TestScope : IDisposable
 {
     private readonly Activity _root;
-    private readonly Action _leave;
+    private readonly SpanRecorder _recorder;
+    private static readonly AsyncLocal<TestScope?> Ambient = new();
+    private readonly TestScope? _previous;
+    private bool _disposed;
 
-    public TestScope(RunningSystem running, string testName, Action leave)
+    public TestScope(RunningSystem running, SpanRecorder recorder, string testName)
     {
         Running = running;
-        _leave = leave;
-        _root = SpanRecorder.Begin(testName);
+        _recorder = recorder;
+        _root = recorder.Begin(testName);
         TraceId = _root.TraceId.ToHexString();
+        _previous = Ambient.Value;
+        Ambient.Value = this;
+    }
+
+    public static TestScope Current
+    {
+        get
+        {
+            var scope = Ambient.Value
+                ?? throw new InvalidOperationException("No test of a class with an architecture attribute is running.");
+            ObjectDisposedException.ThrowIf(scope._disposed, scope);
+            return scope;
+        }
     }
 
     public RunningSystem Running { get; }
     private string TraceId { get; }
 
-    public async Task<TestTrace> SettleAsync(CancellationToken cancellationToken = default)
+    public TestTrace Snapshot() => new(TraceId, _recorder.Capture);
+
+    public Task<TestTrace> SettleAsync(CancellationToken cancellationToken = default) =>
+        SettleAsync(trace => Running.Verify(trace).Outcome != ArchitectureOutcome.InsufficientEvidence, cancellationToken);
+
+    public async Task<TestTrace> SettleAsync(Func<TestTrace, bool> until, CancellationToken cancellationToken)
     {
-        SpanRecorder.Flush();
-        var capture = await SpanRecorder.AwaitAsync(Complete, cancellationToken).ConfigureAwait(false);
-        return new TestTrace(TraceId, capture);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _recorder.Flush();
+        try
+        {
+            var capture = await _recorder.AwaitAsync(snapshot =>
+            {
+                var trace = new TestTrace(TraceId, snapshot);
+                return CallsAreComplete(trace) && until(trace);
+            }, cancellationToken).ConfigureAwait(false);
+            return new TestTrace(TraceId, capture);
+        }
+        catch (TimeoutException error)
+        {
+            var trace = new TestTrace(TraceId, _recorder.Capture);
+            throw new ArchitectureException($"Timed out waiting for invocation evidence. {Running.Verify(trace).Message}\n{trace.Summary()}", error);
+        }
     }
 
-    private bool Complete(TelemetrySnapshot snapshot)
+    private bool CallsAreComplete(TestTrace trace)
     {
-        var spans = snapshot.Spans.Where(span => span.TraceId == TraceId).ToArray();
-        foreach (var client in spans.Where(span => span.Kind == SpanKind.Client))
+        foreach (var client in trace.Spans.Where(span => span.Kind == SpanKind.Client))
         {
             if (!Uri.TryCreate(client.GetString("url.full"), UriKind.Absolute, out var url))
             {
@@ -237,7 +277,7 @@ internal sealed class TestScope : IDisposable
 
             var target = Running.Endpoints.FirstOrDefault(endpoint => Uri.Compare(endpoint.Value, url,
                 UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0);
-            if (target.Key is not null && !spans.Any(server => server.Kind == SpanKind.Server
+            if (target.Key is not null && !trace.Spans.Any(server => server.Kind == SpanKind.Server
                     && server.ParentSpanId == client.SpanId && server.Service == target.Key))
             {
                 return false;
@@ -248,7 +288,12 @@ internal sealed class TestScope : IDisposable
 
     public void Dispose()
     {
-        try { SpanRecorder.End(_root); }
-        finally { _leave(); }
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+        try { _recorder.End(_root); }
+        finally { Ambient.Value = _previous; }
     }
 }

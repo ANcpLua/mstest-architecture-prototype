@@ -31,29 +31,29 @@ public abstract class ArchitectureAttribute : TestClassAttribute
     /// Checks what really happened against the claim. A trace without a single span from a brick is not a pass:
     /// then nothing was measured.
     /// </summary>
-    /// <returns>What does not fit, or null when the trace fits the architecture.</returns>
-    protected internal string? Verify(TestTrace trace, IReadOnlyList<string> bricks)
+    internal ArchitectureVerdict Verify(TestTrace trace, IReadOnlyList<string> bricks)
     {
         ArgumentNullException.ThrowIfNull(trace);
         ArgumentNullException.ThrowIfNull(bricks);
 
         if (trace.Services.Count == 0)
         {
-            return "No span from any brick reached the test, so the architecture was not measured.";
+            return new(ArchitectureOutcome.InsufficientEvidence,
+                "No span from any brick reached the test, so the architecture was not measured.");
         }
 
         foreach (var service in trace.Services)
         {
             if (!bricks.Contains(service))
             {
-                return $"{service} produced spans but is not a stacked brick.";
+                return new(ArchitectureOutcome.Violated, $"{service} produced spans but is not a stacked brick.");
             }
         }
 
         // Report the relationship between stores before checking each store's name.
         if (VerifyShape(trace) is { } problem)
         {
-            return problem;
+            return new(ArchitectureOutcome.Violated, problem);
         }
 
         foreach (var service in trace.Services)
@@ -61,16 +61,30 @@ public abstract class ArchitectureAttribute : TestClassAttribute
             var foreign = trace.StoresOf(service).Where(store => store.Namespace != StoreOf(service)).ToList();
             if (foreign.Count > 0)
             {
-                return $"{service} wrote to {string.Join(", ", foreign.Select(store => store.Namespace))}, but as part of a {Kind} it owns the store {StoreOf(service)}.";
+                return new(ArchitectureOutcome.Violated,
+                    $"{service} wrote to {string.Join(", ", foreign.Select(store => store.Namespace))}, but as part of a {Kind} it owns the store {StoreOf(service)}.");
             }
         }
 
-        return null;
+        var unmeasured = bricks.Where(brick => trace.StoresOf(brick).Count == 0).ToArray();
+        return unmeasured.Length > 0
+            ? new(ArchitectureOutcome.InsufficientEvidence,
+                $"Architecture not measured: no store activity was captured for {string.Join(", ", unmeasured)}.")
+            : new(ArchitectureOutcome.Conforms, $"Observed store activity conforms to {Kind} for every declared brick.");
     }
 
     /// <summary>The rule that sets this architecture apart, checked on the trace.</summary>
     protected abstract string? VerifyShape(TestTrace trace);
 }
+
+internal enum ArchitectureOutcome
+{
+    Conforms,
+    Violated,
+    InsufficientEvidence
+}
+
+internal sealed record ArchitectureVerdict(ArchitectureOutcome Outcome, string Message);
 
 /// <summary>One deployable with its own store.</summary>
 public sealed class MonolithAttribute : ArchitectureAttribute

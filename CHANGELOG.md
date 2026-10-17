@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Distinguish architecture violations from insufficient evidence; require store activity from every declared brick.
+- Add explicit evidence predicates for operations, logs, events and metrics instead of treating HTTP span arrival as universal completion.
+- Preserve original test failures and result arrays when evidence collection or scope cleanup fails.
+- Attach retained evidence after failed shutdown and attempt cleanup of every owned resource.
+- Replace process-wide recorder state and service caches with a lazy, consuming-assembly session.
+- Forward native invocation cancellation through startup and evidence waits without suppressing experimental API diagnostics.
+
+Validation: 75 existing cases passed across focused runs, including native discovery
+and a unit-only selection that created no collector. JetBrains reported zero findings.
+No test methods were added. These changes are unreleased.
+
 ## 6.0.2
 
 - Align the applications with telemetry 28.0.0 and SemanticConventions 13.1.2.

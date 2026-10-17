@@ -55,17 +55,53 @@ Enabled compiler and analyzer suggestions are warnings, and warnings fail compil
 
 ## Processes and invocation lifetime
 
+The automatic assembly fixture registers a run-owned session without launching
+processes. Architecture tests start its recorder and collector lazily; ordinary unit
+tests do not acquire those dependencies. Service caches and the current invocation
+belong to that consuming assembly's session. Tests that exercise the recorder
+directly start it explicitly; receiver-only tests do not start the collector.
+
 `Qyl.Orchestration` reserves loopback endpoints, passes service references, checks
 that `/health` returns the child's process ID, and owns startup, cancellation and
-shutdown. Startup errors retain child output. Only the selected services start.
-The in-memory store spans demonstrate ownership; the stores are not databases.
+shutdown. Only the selected services start. The in-memory store spans demonstrate
+ownership; the stores are not databases.
 
 `Architecture.Testing` uses native `TestClassAttribute`,
 `TestMethodAttribute.ExecuteAsync` and `AssemblyFixtureProvider` extension points.
-The wrapper delegates to the original method attribute and retains its result objects,
-earlier failures and native data-row behavior. Each invocation has a separate trace.
-A real discovery subprocess checks the original source file and line for every
-architecture case. MSTest owns navigation and duration reporting.
+The wrapper delegates once to the original method attribute and retains its result
+objects, existing failures and native data-row behavior. Evidence and cleanup
+failures are attached to the original results; they do not replace an existing
+assertion failure. The same diagnostic applies to every result returned by an
+executor, rather than being assigned arbitrarily to its last result. An executor
+exception remains the primary exception if scope cleanup also fails.
+
+The internal executor declares its dependency on MSTest 4.5.1's experimental
+`TestContext.Current` API. No diagnostic is suppressed and consuming tests keep
+their existing syntax. Its native invocation token flows through startup and
+evidence waits. Resource cleanup deliberately remains independent of an already
+cancelled invocation so owned processes are still joined.
+
+Each invocation has a separate trace. A real discovery subprocess checks the
+original source file and line for every architecture case. MSTest owns navigation
+and duration reporting.
+
+The default evidence wait requires observed store activity for every declared
+brick and matching server spans for observed HTTP calls to those bricks. Verification
+distinguishes conformance, a violation and insufficient evidence. A partial trace
+cannot establish that multiple services own or share their stores. A successful
+verdict describes the observed scenario, not every possible execution.
+
+For a different scenario, `TraceAsync(trace => /* required evidence */, token)` waits
+for an explicit predicate over the trace and its complete captured telemetry. Use
+that form for operations that do not touch stores, background business events,
+logs or metrics. Metrics require a producer identity and measurement window; they
+are not individual trace events. An explicit read predicate does not waive final
+architecture verification. An HTTP response or server span alone does not
+establish that all telemetry has arrived. Each wait is bounded and cancellable.
+
+Shutdown attempts every owned resource even when another cleanup step fails.
+Captured exports, delivery records, source inventories and Collector shutdown logs
+are attached to the native test report even when shutdown reports an error.
 
 Three deliberately failing cases in `tests/Architecture.Probes` test missing telemetry,
 invalid composition and original assertion failures. Passing parent tests run each
@@ -92,8 +128,8 @@ stored counts without implying that the original export was lost.
 The test process uses the official SDK for invocation roots and HTTP client spans.
 Application processes use `AddQyl()` for traces, logs and metrics. Exporter forwarding
 is suppressed from instrumentation to prevent export loops. Architecture assertions
-wait for matching client/server evidence with a bounded deadline; ongoing background
-spans do not require a quiet period. Stored-data tests await the actual persisted
+wait for the declared store evidence and matching client/server spans with a bounded
+deadline; ongoing background spans do not require a quiet period. Stored-data tests await the actual persisted
 record separately.
 
 `TestTrace.Telemetry.Capture` retains every captured record and original payload.

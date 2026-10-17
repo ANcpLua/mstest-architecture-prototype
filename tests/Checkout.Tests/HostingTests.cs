@@ -9,11 +9,13 @@ namespace Checkout.Tests;
 [TestClass]
 public sealed class HostingTests(TestContext testContext)
 {
+    private ArchitectureRun Run => ArchitectureFixtures.GetRun(testContext);
+
     /// <summary>Disposing the selected service stops its process and invalidates further clients.</summary>
     [TestMethod]
     public async Task SelectedServiceRunsInItsOwnProcessAndDisposalStopsIt()
     {
-        var system = await RunningSystem.StartAsync(new MonolithAttribute(),
+        var system = await RunningSystem.StartAsync(Run, new MonolithAttribute(),
             [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")], testContext.CancellationToken);
         Process? child = null;
         try
@@ -45,7 +47,7 @@ public sealed class HostingTests(TestContext testContext)
     {
         var failure = await Assert.ThrowsExactlyAsync<ArchitectureException>(async () =>
         {
-            await using var system = await RunningSystem.StartAsync(new MonolithAttribute(),
+            await using var system = await RunningSystem.StartAsync(Run, new MonolithAttribute(),
                 [new ServiceAttribute<Orders.Api.EntryPoint>("orders-api")], testContext.CancellationToken);
         });
 
@@ -56,7 +58,7 @@ public sealed class HostingTests(TestContext testContext)
     /// <summary>A canceled launch request stops before starting a service.</summary>
     [TestMethod]
     public async Task CancelledStartupIsNotReportedAsAServiceFailure() =>
-        _ = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => RunningSystem.StartAsync(
+        _ = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => RunningSystem.StartAsync(Run,
             new MonolithAttribute(), [new ServiceAttribute<Payments.Api.EntryPoint>("payments-api")],
             new CancellationToken(canceled: true)));
 }

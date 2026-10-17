@@ -19,6 +19,8 @@ namespace Checkout.Tests;
 [TestClass]
 public sealed class RecorderTests(TestContext testContext)
 {
+    private SpanRecorder Recorder => ArchitectureFixtures.GetRun(testContext).Recorder;
+
     private static readonly HttpClient Client = new();
     private static readonly string[] Checkpoints = ["first", "second"];
 
@@ -26,17 +28,18 @@ public sealed class RecorderTests(TestContext testContext)
     [TestMethod]
     public async Task QylStoresCompletedTestRootAndClient()
     {
-        using var root = SpanRecorder.Begin(nameof(QylStoresCompletedTestRootAndClient));
+        await Recorder.StartAsync(testContext.CancellationToken);
+        using var root = Recorder.Begin(nameof(QylStoresCompletedTestRootAndClient));
         var traceId = root.TraceId.ToHexString();
         var rootId = root.SpanId.ToHexString();
         try
         {
-            using var response = await Client.GetAsync(new Uri(SpanRecorder.Collector.Address, "health"), testContext.CancellationToken);
+            using var response = await Client.GetAsync(new Uri(Recorder.Collector.Address, "health"), testContext.CancellationToken);
             _ = response.EnsureSuccessStatusCode();
         }
         finally
         {
-            SpanRecorder.End(root);
+            Recorder.End(root);
         }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(20));
@@ -45,7 +48,7 @@ public sealed class RecorderTests(TestContext testContext)
         {
             try
             {
-                trace = await Client.GetFromJsonAsync<JsonElement>(new Uri(SpanRecorder.Collector.Address, $"api/v1/traces/{traceId}"), deadline.Token);
+                trace = await Client.GetFromJsonAsync<JsonElement>(new Uri(Recorder.Collector.Address, $"api/v1/traces/{traceId}"), deadline.Token);
                 if (trace.GetProperty("spans").EnumerateArray().Any(span => span.GetProperty("span_id").GetString() == rootId))
                 {
                     break;
@@ -71,7 +74,8 @@ public sealed class RecorderTests(TestContext testContext)
     [TestMethod]
     public async Task QylStoresExceptionSpanEvents()
     {
-        using var root = SpanRecorder.Begin(nameof(QylStoresExceptionSpanEvents));
+        await Recorder.StartAsync(testContext.CancellationToken);
+        using var root = Recorder.Begin(nameof(QylStoresExceptionSpanEvents));
         var traceId = root.TraceId.ToHexString();
         try
         {
@@ -86,9 +90,9 @@ public sealed class RecorderTests(TestContext testContext)
         }
         finally
         {
-            SpanRecorder.End(root);
+            Recorder.End(root);
         }
-        var original = Assert.ContainsSingle(Assert.ContainsSingle(SpanRecorder.SpansOf(traceId)).Events);
+        var original = Assert.ContainsSingle(Assert.ContainsSingle(Recorder.SpansOf(traceId)).Events);
         Assert.AreEqual("exception", original.Name);
         Assert.AreEqual("payment declined", original.Attributes["exception.message"]);
         Assert.IsNotNull(original.Attributes["exception.stacktrace"]);
@@ -98,7 +102,7 @@ public sealed class RecorderTests(TestContext testContext)
         {
             try
             {
-                var events = await SpanRecorder.Collector.Telemetry.SpanEventsAsync(traceId, deadline.Token);
+                var events = await Recorder.Collector.Telemetry.SpanEventsAsync(traceId, deadline.Token);
                 if (events.FirstOrDefault(spanEvent => spanEvent.Name == "exception") is { } exception)
                 {
                     var attributes = exception.Attributes!.ToDictionary(attribute => attribute.Key, attribute => attribute.Value);
@@ -120,29 +124,31 @@ public sealed class RecorderTests(TestContext testContext)
     [TestMethod]
     public async Task RecorderCanStopAndRestart()
     {
-        await SpanRecorder.StopAsync();
+        await Recorder.StartAsync(testContext.CancellationToken);
+        await ArchitectureFixtures.GetRun(testContext).StopAsync();
         try
         {
-            await SpanRecorder.StopAsync();
-            _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.ReceiverAddress);
-            _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.Collector);
-            _ = Assert.ThrowsExactly<InvalidOperationException>(() => SpanRecorder.Begin("not-listening"));
+            await ArchitectureFixtures.GetRun(testContext).StopAsync();
+            _ = Assert.ThrowsExactly<InvalidOperationException>(() => Recorder.ReceiverAddress);
+            _ = Assert.ThrowsExactly<InvalidOperationException>(() => Recorder.Collector);
+            _ = Assert.ThrowsExactly<InvalidOperationException>(() => Recorder.Begin("not-listening"));
         }
         finally
         {
-            await SpanRecorder.StartAsync();
+            await Recorder.StartAsync(testContext.CancellationToken);
         }
-        var address = SpanRecorder.ReceiverAddress;
-        await SpanRecorder.StartAsync();
-        Assert.AreEqual(address, SpanRecorder.ReceiverAddress);
-        Assert.IsNotEmpty(SpanRecorder.EvidenceFiles);
+        var address = Recorder.ReceiverAddress;
+        await Recorder.StartAsync(testContext.CancellationToken);
+        Assert.AreEqual(address, Recorder.ReceiverAddress);
+        Assert.IsNotEmpty(Recorder.EvidenceFiles);
     }
 
     /// <summary>The SDK and canonical decoder preserve typed values, event order, metadata and ended roots.</summary>
     [TestMethod]
-    public void SdkCapturePreservesTypedValuesAndOrderedEvents()
+    public async Task SdkCapturePreservesTypedValuesAndOrderedEvents()
     {
-        using var root = SpanRecorder.Begin(nameof(SdkCapturePreservesTypedValuesAndOrderedEvents));
+        await Recorder.StartAsync(testContext.CancellationToken);
+        using var root = Recorder.Begin(nameof(SdkCapturePreservesTypedValuesAndOrderedEvents));
         var traceId = root.TraceId.ToHexString();
         try
         {
@@ -159,7 +165,7 @@ public sealed class RecorderTests(TestContext testContext)
                 }));
                 _ = child.AddEvent(new ActivityEvent("order.charged"));
             }
-            var captured = Assert.ContainsSingle(SpanRecorder.SpansOf(traceId));
+            var captured = Assert.ContainsSingle(Recorder.SpansOf(traceId));
             Assert.AreEqual(root.SpanId.ToHexString(), captured.ParentSpanId);
             Assert.AreEqual(long.MaxValue, captured.GetInt64("checkout.sequence"));
             Assert.IsNull(captured.GetString("checkout.sequence"));
@@ -179,20 +185,21 @@ public sealed class RecorderTests(TestContext testContext)
         }
         finally
         {
-            SpanRecorder.End(root);
+            Recorder.End(root);
         }
-        Assert.HasCount(2, SpanRecorder.SpansOf(traceId));
-        Assert.IsEmpty(SpanRecorder.SpansOf("unrecorded-trace"));
+        Assert.HasCount(2, Recorder.SpansOf(traceId));
+        Assert.IsEmpty(Recorder.SpansOf("unrecorded-trace"));
     }
 
     /// <summary>Each invocation owns a trace while preserving its caller's ambient activity.</summary>
     [TestMethod]
-    public void InvocationRootsHaveSeparateTracesAndRestoreTheirAmbientParent()
+    public async Task InvocationRootsHaveSeparateTracesAndRestoreTheirAmbientParent()
     {
-        using var outer = SpanRecorder.Begin("outer invocation");
+        await Recorder.StartAsync(testContext.CancellationToken);
+        using var outer = Recorder.Begin("outer invocation");
         try
         {
-            using var inner = SpanRecorder.Begin("inner invocation");
+            using var inner = Recorder.Begin("inner invocation");
             try
             {
                 Assert.AreNotEqual(outer.TraceId, inner.TraceId);
@@ -200,13 +207,13 @@ public sealed class RecorderTests(TestContext testContext)
             }
             finally
             {
-                SpanRecorder.End(inner);
+                Recorder.End(inner);
             }
             Assert.AreSame(outer, Activity.Current);
         }
         finally
         {
-            SpanRecorder.End(outer);
+            Recorder.End(outer);
         }
     }
 

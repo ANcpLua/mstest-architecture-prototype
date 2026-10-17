@@ -16,6 +16,8 @@ namespace Checkout.Tests;
 [Service<PaymentsApi>("payments-api")]
 public sealed class TelemetryTests(TestContext testContext)
 {
+    private SpanRecorder Recorder => ArchitectureFixtures.GetRun(testContext).Recorder;
+
     /// <summary>Both services export structured logs with the request's trace identity.</summary>
     [TestMethod]
     public async Task QylStoresCorrelatedApplicationLogs()
@@ -52,7 +54,7 @@ public sealed class TelemetryTests(TestContext testContext)
         Assert.IsGreaterThanOrEqualTo(server.StartTimeUnixNano, created.TimeUnixNano);
         Assert.IsLessThanOrEqualTo(server.EndTimeUnixNano, created.TimeUnixNano);
         var instance = server.Resource.Attributes["service.instance.id"];
-        var capture = await SpanRecorder.AwaitAsync(snapshot => snapshot.Metrics.Any(metric =>
+        var capture = await Recorder.AwaitAsync(snapshot => snapshot.Metrics.Any(metric =>
             metric.Name == "checkout.orders.created" && Equals(metric.Resource.Attributes["service.instance.id"], instance)), testContext.CancellationToken);
         var counter = capture.Metrics.Last(item => item.Name == "checkout.orders.created"
             && Equals(item.Resource.Attributes["service.instance.id"], instance));
@@ -81,7 +83,7 @@ public sealed class TelemetryTests(TestContext testContext)
         var trace = await SystemUnderTest.Current.TraceAsync(testContext.CancellationToken);
         var instances = trace.Spans.Where(span => span.Service is "orders-api" or "payments-api")
             .Select(span => span.Resource.Attributes["service.instance.id"]).ToHashSet();
-        var capture = await SpanRecorder.AwaitAsync(snapshot => snapshot.Metrics.Any(metric => metric.Name == name
+        var capture = await Recorder.AwaitAsync(snapshot => snapshot.Metrics.Any(metric => metric.Name == name
             && instances.Contains(metric.Resource.Attributes["service.instance.id"])), testContext.CancellationToken);
         // These are process measurements, selected by resource identity, not attributed to this request.
         var observed = capture.Metrics.Where(metric => metric.Name == name

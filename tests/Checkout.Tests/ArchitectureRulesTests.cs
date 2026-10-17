@@ -25,9 +25,9 @@ public sealed class ArchitectureRulesTests
     public void MissingAndForeignSpansFailVerification()
     {
         var architecture = new MonolithAttribute();
-        Assert.Contains("not measured", architecture.Verify(TestSpan.Trace(), ["orders"])!);
-        Assert.Contains("not measured", architecture.Verify(TestSpan.Trace(TestSpan.Create(SpanRecorder.TestProcess, "1")), ["orders"])!);
-        Assert.Contains("intruder produced spans", architecture.Verify(TestSpan.Trace(TestSpan.Create("intruder", "1")), ["orders"])!);
+        Assert.Contains("not measured", architecture.Verify(TestSpan.Trace(), ["orders"]).Message);
+        Assert.Contains("not measured", architecture.Verify(TestSpan.Trace(TestSpan.Create(SpanRecorder.TestProcess, "1")), ["orders"]).Message);
+        Assert.Contains("intruder produced spans", architecture.Verify(TestSpan.Trace(TestSpan.Create("intruder", "1")), ["orders"]).Message);
     }
 
     /// <summary>Arguments required by public execution and verification APIs are checked.</summary>
@@ -46,9 +46,8 @@ public sealed class ArchitectureRulesTests
     {
         var trace = TestSpan.Trace(TestSpan.Create("orders", "1", store: "payments"));
         var failure = new MicroservicesAttribute().Verify(trace, ["orders", "payments"]);
-        Assert.IsNotNull(failure);
-        Assert.Contains("orders wrote to payments", failure);
-        Assert.Contains("owns the store orders", failure);
+        Assert.Contains("orders wrote to payments", failure.Message);
+        Assert.Contains("owns the store orders", failure.Message);
     }
 
     /// <summary>A monolith accepts calls from the test process but rejects service-to-service calls.</summary>
@@ -58,10 +57,11 @@ public sealed class ArchitectureRulesTests
         var architecture = new MonolithAttribute();
         var external = TestSpan.Create(SpanRecorder.TestProcess, "client", SpanKind.Client);
         var server = TestSpan.Create("orders", "server", SpanKind.Server, "client");
-        Assert.IsNull(architecture.Verify(TestSpan.Trace(external, server), ["orders"]));
+        Assert.AreEqual(ArchitectureOutcome.Conforms, architecture.Verify(TestSpan.Trace(external, server,
+            TestSpan.Create("orders", "write", store: "orders")), ["orders"]).Outcome);
         var internalClient = TestSpan.Create("orders", "client", SpanKind.Client);
         var internalServer = TestSpan.Create("payments", "server", SpanKind.Server, "client");
-        Assert.Contains("orders called payments", architecture.Verify(TestSpan.Trace(internalClient, internalServer), ["orders", "payments"])!);
+        Assert.Contains("orders called payments", architecture.Verify(TestSpan.Trace(internalClient, internalServer), ["orders", "payments"]).Message);
     }
 
     /// <summary>Independent services can write their own stores but cannot share one.</summary>
@@ -71,11 +71,10 @@ public sealed class ArchitectureRulesTests
         var architecture = new MicroservicesAttribute();
         var orders = TestSpan.Create("orders", "1", store: "orders");
         var payments = TestSpan.Create("payments", "2", store: "payments");
-        Assert.IsNull(architecture.Verify(TestSpan.Trace(orders, payments), ["orders", "payments"]));
+        Assert.AreEqual(ArchitectureOutcome.Conforms, architecture.Verify(TestSpan.Trace(orders, payments), ["orders", "payments"]).Outcome);
         var failure = architecture.Verify(TestSpan.Trace(orders, TestSpan.Create("payments", "2", store: "orders")), ["orders", "payments"]);
-        Assert.IsNotNull(failure);
-        Assert.Contains("Microservices own their stores", failure);
-        Assert.Contains("orders and payments", failure);
+        Assert.Contains("Microservices own their stores", failure.Message);
+        Assert.Contains("orders and payments", failure.Message);
     }
 
     /// <summary>A distributed monolith reports distinct stores before its per-service ownership check.</summary>
@@ -85,11 +84,10 @@ public sealed class ArchitectureRulesTests
         var architecture = new DistributedMonolithAttribute();
         var orders = TestSpan.Create("orders", "1", store: "shared");
         var payments = TestSpan.Create("payments", "2", store: "shared");
-        Assert.IsNull(architecture.Verify(TestSpan.Trace(orders, payments), ["orders", "payments"]));
-        Assert.IsNull(architecture.Verify(TestSpan.Trace(orders), ["orders", "payments"]));
+        Assert.AreEqual(ArchitectureOutcome.Conforms, architecture.Verify(TestSpan.Trace(orders, payments), ["orders", "payments"]).Outcome);
+        Assert.AreEqual(ArchitectureOutcome.InsufficientEvidence, architecture.Verify(TestSpan.Trace(orders), ["orders", "payments"]).Outcome);
         var failure = architecture.Verify(TestSpan.Trace(orders, TestSpan.Create("payments", "2", store: "other")), ["orders", "payments"]);
-        Assert.IsNotNull(failure);
-        Assert.Contains("shares one store", failure);
-        Assert.Contains("shared, other", failure);
+        Assert.Contains("shares one store", failure.Message);
+        Assert.Contains("shared, other", failure.Message);
     }
 }
