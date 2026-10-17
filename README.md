@@ -19,9 +19,9 @@ public sealed class CheckoutTests
 
 This checkout uses .NET SDK 10.0.401, MSTest SDK 4.5.1, Microsoft.Testing.Platform
 2.5.1 and Microsoft coverage 18.12.0. Its published dependencies are qyl and
-`Qyl.Orchestration` 14.0.0, `Qyl.Telemetry.Hosting` 26.0.0,
-`Qyl.Api.Contracts` 14.0.0 and `Qyl.Telemetry.Testing` 1.1.2. The instrumentation
-stack supplies SemanticConventions 12.0.0 and OpenTelemetry SDK/exporter 1.20.0.
+`Qyl.Orchestration` 15.0.0, `Qyl.Telemetry.Hosting` 27.0.0,
+`Qyl.Api.Contracts` 14.0.0 and `Qyl.Telemetry.Testing` 3.0.2. The instrumentation
+stack supplies SemanticConventions 13.1.1 and OpenTelemetry SDK/exporter 1.20.0.
 Restore downloads the runtime for the SDK's OS and architecture; no sibling clone
 or private feed is needed.
 
@@ -33,12 +33,15 @@ With global DotCov 4.7.0 or later installed:
 ./build.sh --configuration Release
 ```
 
-The build runs all 73 native test cases through global DotCov and requires a real
-coverage report with line and branch data. Coverage percentages are informational,
-following the owner's removal of blanket library thresholds. Test failures, missing
-or ambiguous coverage, and JetBrains warnings, errors or suggestions fail the build.
+By default the build runs all 73 native test cases through global DotCov and requires
+a real coverage report with line and branch data. Coverage percentages are informational.
+Test failures, missing or ambiguous coverage, and JetBrains warnings, errors or
+suggestions fail the build.
 `artifacts/coverage.json`, `artifacts/coverage.stderr` and
 `artifacts/jb-inspections.xml` retain the results. No coverage exclusions were added.
+
+For a focused change, pass `--TestFilter '<MSTest filter>' --MinimumExpectedTests <count>`.
+The minimum must match the intended scope; a filter that discovers too few tests fails.
 
 To run only the tests:
 
@@ -102,9 +105,9 @@ the same trace, server span and service instance. Payment and failure logs retai
 named events as well. Custom application event names are supported.
 
 Tests check typed values, ordered span events, timestamps, trace flags, resource and
-scope metadata. The raw capture keeps exception message and stack trace. The collector's
-existing exception-event persistence policy keeps `exception.type`; tests distinguish
-that stored policy from the original exported event.
+scope metadata. The raw capture keeps the original exception event. Tests verify that
+the Collector retains harmless exception messages, stack traces and type; its bounded
+sanitizer redacts embedded credentials before persistence.
 
 Native HTTP server/client and runtime CPU/memory metrics are checked for their actual
 units, exported shapes and producer identity. Process metrics belong to a resource,
@@ -144,3 +147,14 @@ dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 0 --min-branch
 With both percentage thresholds disabled, DotCov reports its documented exit 4.
 The build accepts that informational outcome only after the native tests pass and
 coverage data is present and unambiguous. Other tool failures still fail the build.
+
+## Releases
+
+After committing and pushing the version and changelog to `main`, run
+`./release.sh <x.y.z>`. It archives that exact commit and runs the native tests,
+global DotCov and JetBrains checks from the extracted source before creating the tag
+and GitHub release. The release includes the source archive and coverage/inspection
+reports; `artifacts/release-<x.y.z>/` records the commit, complete gate log and retained
+source path for inspecting every telemetry phase.
+To verify only affected tests, append `--filter '<MSTest filter>' --minimum-tests <count>`.
+The release includes `test-scope.txt` so its verification scope is explicit.

@@ -1,9 +1,9 @@
 # Changelog
 
-## 5.0.3
+## 6.0.0
 
-- Align qyl and orchestration at 14.0.0, telemetry at 26.0.0, contracts at 14.0.0
-  and the canonical testing library at 1.1.2.
+- Align qyl and orchestration at 15.0.0, telemetry at 27.0.0, contracts at 14.0.0
+  and the canonical testing library at 3.0.2.
 - Replace the duplicated OTLP decoder and span model with the published testing
   receiver and records. Keep every original export, typed signal and actual
   collector response in retained evidence.
@@ -11,6 +11,9 @@
   cancellation, separate invocation traces, original MSTest results and discovery locations.
 - Record an actual order counter and business span event, and verify correlated
   named logs plus native HTTP/runtime metric types, units and resource identity.
+- Use native application attribute names and types with SemanticConventions 13.1.1.
+- Verify the Collector retains harmless exception messages and stack traces, alongside
+  the original captured exception event.
 - Keep coverage gaps visible without blanket library percentage thresholds;
   require passing native invariants, valid coverage data and clean inspections.
 

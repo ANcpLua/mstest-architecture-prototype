@@ -158,7 +158,7 @@ internal static class SpanRecorder
         var root = Spans.Source.StartActivity("architecture.test", ActivityKind.Internal,
             new ActivityContext(ActivityTraceId.CreateRandom(), default, ActivityTraceFlags.Recorded))
             ?? throw new InvalidOperationException("The span recorder is not listening.");
-        _ = root.SetAppTag("test.name", testName);
+        _ = root.SetTag("test.name", testName);
         return root;
     }
 

@@ -17,6 +17,12 @@ sealed class Build : FalloutBuild
     [Parameter("Configuration to build - Default is 'Debug' (local) or 'Release' (server)", Name = "Configuration")]
     readonly Configuration _configuration = IsLocalBuild ? Configuration.Debug : Configuration.Release;
 
+    [Parameter("Native MSTest filter; omit to run every test", Name = "TestFilter")]
+    readonly string? _testFilter;
+
+    [Parameter("Minimum number of tests required for the selected scope", Name = "MinimumExpectedTests")]
+    readonly int _minimumExpectedTests = 73;
+
     [Solution(Name = "Solution")]
     readonly Solution _solution;
 
@@ -47,13 +53,17 @@ sealed class Build : FalloutBuild
         .Produces(TestResultsDirectory / "**/*.trx")
         .Executes(() =>
         {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_minimumExpectedTests);
+            if (_testFilter?.Any(character => character is '"' or '\r' or '\n') == true)
+                throw new ArgumentException("The test filter cannot contain quotes or line breaks.", nameof(_testFilter));
+            var filter = string.IsNullOrWhiteSpace(_testFilter) ? "" : $" --filter \"{_testFilter}\"";
             // Native test outcomes gate business invariants. Keep the coverage report without
             // the blanket library percentage gate removed by the owner on 2026-10-16.
             var reportPath = RootDirectory / "artifacts" / "coverage.json";
             reportPath.Parent.CreateDirectory();
             var process = ProcessTasks.StartProcess(
                     ToolPathResolver.GetPathExecutable("dotcov"),
-                    $"test \"{TestProject}\" --min-line 0 --min-branch 0 --format json -- -c {_configuration} --no-build --no-restore --minimum-expected-tests 73 --report-trx --coverage-settings \"{RootDirectory / "coverage.config"}\" --coverage-output coverage.cobertura.xml",
+                    $"test \"{TestProject}\" --min-line 0 --min-branch 0 --format json -- -c {_configuration} --no-build --no-restore --minimum-expected-tests {_minimumExpectedTests}{filter} --report-trx --coverage-settings \"{RootDirectory / "coverage.config"}\" --coverage-output coverage.cobertura.xml",
                     RootDirectory, logOutput: false);
             process.WaitForExit();
             File.WriteAllText(reportPath, string.Join(Environment.NewLine,

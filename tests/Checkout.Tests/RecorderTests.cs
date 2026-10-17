@@ -101,9 +101,10 @@ public sealed class RecorderTests(TestContext testContext)
                 var events = await SpanRecorder.Collector.Telemetry.SpanEventsAsync(traceId, deadline.Token);
                 if (events.FirstOrDefault(spanEvent => spanEvent.Name == "exception") is { } exception)
                 {
-                    var attribute = Assert.ContainsSingle(exception.Attributes!);
-                    Assert.AreEqual("exception.type", attribute.Key);
-                    Assert.AreEqual("System.InvalidOperationException", Assert.IsInstanceOfType<AttributeValue.StringValue>(attribute.Value).Value);
+                    var attributes = exception.Attributes!.ToDictionary(attribute => attribute.Key, attribute => attribute.Value);
+                    Assert.AreEqual("System.InvalidOperationException", Assert.IsInstanceOfType<AttributeValue.StringValue>(attributes["exception.type"]).Value);
+                    Assert.AreEqual("payment declined", Assert.IsInstanceOfType<AttributeValue.StringValue>(attributes["exception.message"]).Value);
+                    Assert.AreEqual(original.Attributes["exception.stacktrace"], Assert.IsInstanceOfType<AttributeValue.StringValue>(attributes["exception.stacktrace"]).Value);
                     Assert.IsGreaterThan(0UL, exception.TimeUnixNano);
                     return;
                 }
