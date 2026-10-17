@@ -18,9 +18,9 @@ public sealed class CheckoutTests
 ```
 
 This checkout uses .NET SDK 10.0.401, MSTest SDK 4.5.1, Microsoft.Testing.Platform
-2.5.1 and Microsoft coverage 18.12.0. Its published dependencies are qyl and
-`Qyl.Orchestration` 15.0.0, `Qyl.Telemetry.Hosting` 27.0.0,
-`Qyl.Api.Contracts` 14.0.0 and `Qyl.Telemetry.Testing` 3.0.2. The instrumentation
+2.5.1 and Microsoft coverage 18.12.0. Its dependency pins are qyl and
+`Qyl.Orchestration` 15.0.2, `Qyl.Telemetry.Hosting` 27.0.0,
+`Qyl.Api.Contracts` 14.0.1 and `Qyl.Telemetry.Testing` 3.0.2. The instrumentation
 stack supplies SemanticConventions 13.1.1 and OpenTelemetry SDK/exporter 1.20.0.
 Restore downloads the runtime for the SDK's OS and architecture; no sibling clone
 or private feed is needed.
@@ -33,7 +33,7 @@ With global DotCov 4.7.0 or later installed:
 ./build.sh --configuration Release
 ```
 
-By default the build runs all 74 native test cases through global DotCov and requires
+By default the build runs all 78 native test cases through global DotCov and requires
 a real coverage report with line and branch data. Coverage percentages are informational.
 Test failures, missing or ambiguous coverage, and JetBrains warnings, errors or
 suggestions fail the build.
@@ -78,7 +78,16 @@ and expected application errors remain in telemetry.
 models. The prototype has no copied decoder or flattened span model. A thin local
 relay captures every protobuf export, forwards it to qyl, and returns the collector's
 actual status, content type and response body. Nonempty valid acknowledgements are
-preserved. Rejected payloads and diagnostics remain in the capture.
+preserved. Fully received exports finish even if the producer disconnects. Failed
+forwards retain the completed stages and failure category; they are never recorded
+as successful Collector responses. Rejected payloads and diagnostics remain in the capture.
+
+OpenTelemetry .NET 1.20.0 can repeat identical HTTP attributes from logging state
+and scopes ([upstream issue](https://github.com/open-telemetry/opentelemetry-dotnet/issues/4324)).
+Testing reports these nonconforming records as partial rejections and retains their
+original payloads. The Collector coalesces identical values and reports that normalization;
+conflicting values remain errors. Decoded capture counts can therefore differ from
+stored counts without implying that the original export was lost.
 
 The test process uses the official SDK for invocation roots and HTTP client spans.
 Application processes use `AddQyl()` for traces, logs and metrics. Exporter forwarding
@@ -95,7 +104,9 @@ namespace rather than merging stores with the same name.
 Each collector retains its DuckDB database, process output and `capture.json` under
 `qyl-data/<run>` beside the test assembly. The capture includes original exports and
 both capture and collector responses. Assembly cleanup attaches these evidence files,
-stops services, joins the receiver and collector, and releases their ports.
+stops services before draining the receiver, then shuts down the Collector and releases
+their ports. `shutdown.json` records the Collector's exit code and whether shutdown
+required forced termination.
 
 ## Traces, logs and metrics
 
@@ -139,7 +150,7 @@ child terminates. Each run writes fresh reports and the native test log into its
 
 ```sh
 dotcov test tests/Checkout.Tests/Checkout.Tests.csproj --min-line 0 --min-branch 0 --format json -- \
-  -c Release --minimum-expected-tests 73 --report-trx \
+  -c Release --minimum-expected-tests 78 --report-trx \
   --coverage-settings coverage.config --coverage-output coverage.cobertura.xml \
   > artifacts/coverage.json 2> artifacts/coverage.stderr
 ```

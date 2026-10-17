@@ -315,4 +315,82 @@ public sealed class RecorderTests(TestContext testContext)
                 Content = new ByteArrayContent(bytes) { Headers = { ContentType = new MediaTypeHeaderValue("application/x-protobuf") } }
             });
     }
+
+    /// <summary>A complete export is still forwarded after its producer disconnects.</summary>
+    [TestMethod]
+    [DataRow("traces")]
+    [DataRow("logs")]
+    [DataRow("metrics")]
+    public async Task ReceiverDrainsAcceptedExportAfterProducerDisconnects(string signal)
+    {
+        using var handler = new PendingCollectorHandler();
+        using var collector = new HttpClient(handler);
+        collector.BaseAddress = new Uri("https://collector.test/");
+        await using var capture = await OtlpReceiver.StartAsync(testContext.CancellationToken);
+        var receiver = await TraceReceiver.StartAsync(capture, new QylTelemetry(collector), testContext.CancellationToken);
+        try
+        {
+            using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(testContext.CancellationToken);
+            using var body = new ByteArrayContent([]);
+            body.Headers.ContentType = new MediaTypeHeaderValue("application/x-protobuf");
+            var send = Client.PostAsync(new Uri(receiver.Address, $"v1/{signal}"), body, cancelled.Token);
+            await handler.Started.Task.WaitAsync(testContext.CancellationToken);
+            await cancelled.CancelAsync();
+            _ = await Assert.ThrowsAsync<OperationCanceledException>(() => send);
+            var stop = receiver.DisposeAsync().AsTask();
+            Assert.IsFalse(stop.IsCompleted, "Shutdown must join the active export.");
+            _ = handler.Complete.TrySetResult();
+            await stop;
+            var delivery = Assert.ContainsSingle(receiver.Deliveries);
+            Assert.AreEqual(200, delivery.CaptureStatus);
+            Assert.AreEqual(200, delivery.CollectorStatus);
+            Assert.IsNull(delivery.Failure);
+            Assert.AreEqual(signal, Assert.ContainsSingle(capture.Snapshot().Requests).Signal);
+        }
+        finally
+        {
+            _ = handler.Complete.TrySetResult();
+            await receiver.DisposeAsync();
+        }
+    }
+
+    /// <summary>Transport failures remain visible rather than disappearing from the delivery list.</summary>
+    [TestMethod]
+    public async Task ReceiverRetainsTransportFailure()
+    {
+        using var handler = new PendingCollectorHandler();
+        using var collector = new HttpClient(handler);
+        collector.BaseAddress = new Uri("https://collector.test/");
+        await using var capture = await OtlpReceiver.StartAsync(testContext.CancellationToken);
+        await using var receiver = await TraceReceiver.StartAsync(capture, new QylTelemetry(collector), testContext.CancellationToken);
+        using var body = new ByteArrayContent([]);
+        body.Headers.ContentType = new MediaTypeHeaderValue("application/x-protobuf");
+        var send = Client.PostAsync(new Uri(receiver.Address, "v1/logs"), body, testContext.CancellationToken);
+        await handler.Started.Task.WaitAsync(testContext.CancellationToken);
+        _ = handler.Complete.TrySetException(new HttpRequestException("upstream unavailable"));
+        using var response = await send;
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.AreEqual(14, RpcStatus.Parser.ParseFrom(await response.Content.ReadAsByteArrayAsync(testContext.CancellationToken)).Code);
+        var delivery = Assert.ContainsSingle(receiver.Deliveries);
+        Assert.AreEqual(200, delivery.CaptureStatus);
+        Assert.IsNull(delivery.CollectorStatus);
+        Assert.AreEqual(nameof(HttpRequestException), delivery.Failure);
+        Assert.AreEqual("logs", Assert.ContainsSingle(capture.Snapshot().Requests).Signal);
+    }
+
+    private sealed class PendingCollectorHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Complete { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _ = Started.TrySetResult();
+            await Complete.Task.WaitAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([]) { Headers = { ContentType = new MediaTypeHeaderValue("application/x-protobuf") } }
+            };
+        }
+    }
 }

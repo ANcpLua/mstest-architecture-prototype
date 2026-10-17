@@ -10,6 +10,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using Qyl.Telemetry.Testing;
+using Google.Protobuf;
+using Code = Google.Rpc.Code;
+using RpcStatus = Google.Rpc.Status;
 
 namespace Architecture.Testing;
 
@@ -19,6 +22,7 @@ internal sealed class TraceReceiver : IAsyncDisposable
     private static readonly HttpClient Transport = new() { Timeout = TimeSpan.FromSeconds(15) };
     private readonly WebApplication _app;
     private readonly ConcurrentQueue<ExportDelivery> _deliveries;
+    private int _disposed;
 
     private TraceReceiver(WebApplication app, Uri address, ConcurrentQueue<ExportDelivery> deliveries)
     {
@@ -50,6 +54,9 @@ internal sealed class TraceReceiver : IAsyncDisposable
                 // This endpoint is an exporter destination. Its forwarding requests must not create
                 // telemetry that exports back into the same destination.
                 using var suppression = SuppressInstrumentationScope.Begin();
+                // A fully received export remains our responsibility if its producer exits.
+                // Bound forwarding independently of RequestAborted, then drain it on StopAsync.
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 using var body = new ByteArrayContent(payload);
                 if (request.ContentType is not null)
                 {
@@ -61,15 +68,32 @@ internal sealed class TraceReceiver : IAsyncDisposable
                     body.Headers.ContentEncoding.Add(encoding);
                 }
 
-                using var captured = await Transport.PostAsync(new Uri(capture.Endpoint, $"v1/{signal}"), body, token).ConfigureAwait(false);
-                var captureReply = await captured.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
-                using var forwarded = await collector.ExportAsync($"v1/{signal}", payload, request.ContentType, encoding, token).ConfigureAwait(false);
-                var collectorReply = await forwarded.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
-                deliveries.Enqueue(new ExportDelivery(signal, (int)captured.StatusCode, captureReply,
-                    (int)forwarded.StatusCode, collectorReply));
-                response.StatusCode = (int)forwarded.StatusCode;
-                response.ContentType = forwarded.Content.Headers.ContentType?.ToString();
-                response.Headers.ContentEncoding = forwarded.Content.Headers.ContentEncoding.ToArray();
+                int? captureStatus = null;
+                byte[] captureReply = [];
+                byte[] collectorReply;
+                try
+                {
+                    using var captured = await Transport.PostAsync(new Uri(capture.Endpoint, $"v1/{signal}"), body, deadline.Token).ConfigureAwait(false);
+                    captureStatus = (int)captured.StatusCode;
+                    captureReply = await captured.Content.ReadAsByteArrayAsync(deadline.Token).ConfigureAwait(false);
+                    using var forwarded = await collector.ExportAsync($"v1/{signal}", payload, request.ContentType, encoding, deadline.Token).ConfigureAwait(false);
+                    collectorReply = await forwarded.Content.ReadAsByteArrayAsync(deadline.Token).ConfigureAwait(false);
+                    deliveries.Enqueue(new ExportDelivery(signal, captureStatus, captureReply,
+                        (int)forwarded.StatusCode, collectorReply));
+                    response.StatusCode = (int)forwarded.StatusCode;
+                    response.ContentType = forwarded.Content.Headers.ContentType?.ToString();
+                    response.Headers.ContentEncoding = forwarded.Content.Headers.ContentEncoding.ToArray();
+                }
+                catch (Exception error) when (error is HttpRequestException or OperationCanceledException)
+                {
+                    deliveries.Enqueue(new ExportDelivery(signal, captureStatus, captureReply, null, [])
+                    {
+                        Failure = error.GetType().Name
+                    });
+                    response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    response.ContentType = "application/x-protobuf";
+                    collectorReply = new RpcStatus { Code = (int)Code.Unavailable, Message = "OTLP forwarding did not complete; see retained delivery evidence." }.ToByteArray();
+                }
                 await response.Body.WriteAsync(collectorReply, token).ConfigureAwait(false);
             });
         }
@@ -100,6 +124,10 @@ internal sealed class TraceReceiver : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
         try
         {
             await _app.StopAsync().ConfigureAwait(false);
@@ -111,5 +139,8 @@ internal sealed class TraceReceiver : IAsyncDisposable
     }
 }
 
-internal sealed record ExportDelivery(string Signal, int CaptureStatus, byte[] CaptureResponse,
-    int CollectorStatus, byte[] CollectorResponse);
+internal sealed record ExportDelivery(string Signal, int? CaptureStatus, byte[] CaptureResponse,
+    int? CollectorStatus, byte[] CollectorResponse)
+{
+    public string? Failure { get; init; }
+}

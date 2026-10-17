@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 
 namespace Architecture.Testing;
 
@@ -107,11 +108,42 @@ internal sealed class QylCollector : IAsyncDisposable
         }
 
         _disposed = true;
-        _process.Kill(entireProcessTree: true);
-        await _process.WaitForExitAsync().ConfigureAwait(false);
-        await File.WriteAllTextAsync(Path.Combine(DataDirectory, "collector.log"),
-            await _output.ConfigureAwait(false) + await _error.ConfigureAwait(false)).ConfigureAwait(false);
-        _client.Dispose();
-        _process.Dispose();
+        var forced = false;
+        try
+        {
+            if (!_process.HasExited)
+            {
+                if (!OperatingSystem.IsWindows())
+                {
+                    using var signal = Process.Start(new ProcessStartInfo("/bin/kill")
+                    {
+                        ArgumentList = { "-TERM", _process.Id.ToString(CultureInfo.InvariantCulture) },
+                        UseShellExecute = false
+                    }) ?? throw new InvalidOperationException("Could not signal the Collector.");
+                    await signal.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                else
+                {
+                    _ = _process.CloseMainWindow();
+                }
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                try { await _process.WaitForExitAsync(deadline.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException)
+                {
+                    forced = true;
+                    _process.Kill(entireProcessTree: true);
+                    await _process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            await File.WriteAllTextAsync(Path.Combine(DataDirectory, "shutdown.json"),
+                JsonSerializer.Serialize(new { _process.ExitCode, Forced = forced })).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Combine(DataDirectory, "collector.log"),
+                await _output.ConfigureAwait(false) + await _error.ConfigureAwait(false)).ConfigureAwait(false);
+        }
+        finally
+        {
+            _client.Dispose();
+            _process.Dispose();
+        }
     }
 }

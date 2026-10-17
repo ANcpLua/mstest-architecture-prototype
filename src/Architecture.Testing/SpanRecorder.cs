@@ -88,7 +88,11 @@ internal static class SpanRecorder
     public static async Task StopAsync()
     {
         await Gate.WaitAsync().ConfigureAwait(false);
-        try { await StopCoreAsync().ConfigureAwait(false); }
+        try
+        {
+            try { await RunningSystem.StopAllAsync().ConfigureAwait(false); }
+            finally { await StopCoreAsync().ConfigureAwait(false); }
+        }
         finally { _ = Gate.Release(); }
     }
 
@@ -98,6 +102,7 @@ internal static class SpanRecorder
         var receiver = _receiver; _receiver = null;
         var capture = _capture; _capture = null;
         var collector = _collector; _collector = null;
+        string? deliveryFailure = null;
         try { provider?.Dispose(); }
         finally
         {
@@ -124,6 +129,13 @@ internal static class SpanRecorder
                                 receiver?.Deliveries
                             }, EvidenceJson)).ConfigureAwait(false);
                             Evidence.Enqueue(path);
+                            var deliveries = receiver?.Deliveries ?? [];
+                            if (deliveries.Count != _lastCapture.Requests.Count
+                                || deliveries.Any(delivery => delivery.Failure is not null
+                                    || delivery.CollectorStatus is not (>= 200 and < 300)))
+                            {
+                                deliveryFailure = $"Not every captured export completed successfully: {_lastCapture.Requests.Count} captured, {deliveries.Count} delivery records. See {path}.";
+                            }
                         }
                     }
                 }
@@ -145,6 +157,10 @@ internal static class SpanRecorder
                     }
                 }
             }
+        }
+        if (deliveryFailure is not null)
+        {
+            throw new InvalidDataException(deliveryFailure);
         }
     }
 

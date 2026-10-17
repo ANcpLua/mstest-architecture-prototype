@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.0.1
+
+- Consume qyl and orchestration 15.0.2 so services can flush final exports before their dependencies stop.
+- Consume API contracts 14.0.1, which preserves the existing contract revision.
+- Stop owned services before restarting the recorder, finish fully received exports after producer disconnects and retain failed forwards with their actual stage and error category.
+- Shut down the Collector gracefully and keep its native exit code and forced-termination status beside the captured telemetry.
+- Verify real client disconnects, forwarding failures and Collector shutdown. Document the upstream duplicate-scope-attribute diagnostics instead of suppressing them.
+
 ## 6.0.0
 
 - Align qyl and orchestration at 15.0.0, telemetry at 27.0.0, contracts at 14.0.0

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Version>6.0.0</Version>
+    <Version>6.0.1</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,9 +10,9 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <QylTelemetryVersion>27.0.0</QylTelemetryVersion>
-    <QylPlatformVersion>15.0.0</QylPlatformVersion>
+    <QylPlatformVersion>15.0.2</QylPlatformVersion>
     <QylTestingVersion>3.0.2</QylTestingVersion>
-    <QylApiContractsVersion>14.0.0</QylApiContractsVersion>
+    <QylApiContractsVersion>14.0.1</QylApiContractsVersion>
   </PropertyGroup>
 
 </Project>

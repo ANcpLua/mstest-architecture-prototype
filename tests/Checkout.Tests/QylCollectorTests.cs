@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Architecture.Testing;
 
 namespace Checkout.Tests;
@@ -32,6 +33,12 @@ public sealed class QylCollectorTests(TestContext testContext)
             }
 
             await collector.DisposeAsync();
+            if (!OperatingSystem.IsWindows())
+            {
+                using var shutdown = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(collector.DataDirectory, "shutdown.json"), testContext.CancellationToken));
+                Assert.AreEqual(0, shutdown.RootElement.GetProperty("ExitCode").GetInt32());
+                Assert.IsFalse(shutdown.RootElement.GetProperty("Forced").GetBoolean());
+            }
             _ = await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() =>
                 collector.Telemetry.LogsAsync("trace", testContext.CancellationToken));
         }

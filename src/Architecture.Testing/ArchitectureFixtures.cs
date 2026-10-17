@@ -20,14 +20,7 @@ public static class ArchitectureFixtures
     [AssemblyCleanup]
     public static async Task StopAsync(TestContext context)
     {
-        try
-        {
-            await RunningSystem.StopAllAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            await SpanRecorder.StopAsync().ConfigureAwait(false);
-        }
+        await SpanRecorder.StopAsync().ConfigureAwait(false);
 
         var lines = SpanRecorder.Sources
             .OrderBy(source => source.Key, StringComparer.Ordinal)
