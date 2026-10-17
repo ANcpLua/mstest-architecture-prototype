@@ -2,8 +2,6 @@
 
 ## 6.0.2
 
-Unreleased.
-
 - Align the applications with telemetry 28.0.0 and SemanticConventions 13.1.2.
 - Consume qyl and orchestration 15.0.3, plus the canonical testing receiver 3.0.3.
 - Keep API contracts 14.0.1; its contract revision is unchanged.
