@@ -33,7 +33,7 @@ With global DotCov 4.7.0 or later installed:
 ./build.sh --configuration Release
 ```
 
-By default the build runs all 73 native test cases through global DotCov and requires
+By default the build runs all 74 native test cases through global DotCov and requires
 a real coverage report with line and branch data. Coverage percentages are informational.
 Test failures, missing or ambiguous coverage, and JetBrains warnings, errors or
 suggestions fail the build.

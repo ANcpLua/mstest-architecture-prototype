@@ -31,7 +31,7 @@ internal static class SpanRecorder
     private static QylCollector? _collector;
     private static TracerProvider? _provider;
 
-    public static TelemetrySnapshot Capture => _capture?.Snapshot() ?? _lastCapture;
+    private static TelemetrySnapshot Capture => _capture?.Snapshot() ?? _lastCapture;
     public static IReadOnlyList<string> EvidenceFiles => [.. Evidence];
     public static IReadOnlyDictionary<string, int> Sources => Capture.Spans
         .GroupBy(span => span.Scope?.Name ?? "<unnamed>", StringComparer.Ordinal)

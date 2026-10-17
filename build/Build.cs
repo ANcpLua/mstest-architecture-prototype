@@ -22,7 +22,7 @@ sealed class Build : FalloutBuild
     readonly string? _testFilter;
 
     [Parameter("Minimum number of tests required for the selected scope", Name = "MinimumExpectedTests")]
-    readonly int _minimumExpectedTests = 73;
+    readonly int _minimumExpectedTests = 74;
 
     [Solution(Name = "Solution")]
     readonly Solution _solution = null!;

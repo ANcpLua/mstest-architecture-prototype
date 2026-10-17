@@ -274,7 +274,11 @@ public sealed class RecorderTests(TestContext testContext)
         Assert.IsEmpty(snapshot.Spans);
         Assert.AreSequenceEqual((byte[])[0x0b], Assert.ContainsSingle(snapshot.Requests).Payload.ToArray());
         var delivery = Assert.ContainsSingle(receiver.Deliveries);
+        Assert.AreEqual("traces", delivery.Signal);
         Assert.AreEqual(400, delivery.CaptureStatus);
+        var captureError = RpcStatus.Parser.ParseFrom(delivery.CaptureResponse);
+        Assert.AreEqual(3, captureError.Code);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(captureError.Message));
         Assert.AreEqual(400, delivery.CollectorStatus);
         Assert.AreSequenceEqual(diagnostic, delivery.CollectorResponse);
     }

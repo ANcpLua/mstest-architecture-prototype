@@ -8,6 +8,20 @@ namespace Checkout.Tests;
 [TestClass]
 public sealed class TraceTests
 {
+    /// <summary>A selected trace retains access to the complete original capture.</summary>
+    [TestMethod]
+    public void SelectingATracePreservesOtherCapturedTraces()
+    {
+        var selected = TestSpan.Create("orders", "selected");
+        var unrelated = new SpanRecord("ffeeddccbbaa99887766554433221100", "unrelated", "other operation");
+        var capture = new TelemetrySnapshot([selected, unrelated], [], [], []);
+        var trace = new TestTrace(selected.TraceId, capture);
+
+        Assert.AreSame(capture, trace.Telemetry.Capture);
+        Assert.HasCount(2, trace.Telemetry.Capture.Spans);
+        Assert.AreSame(selected, Assert.ContainsSingle(trace.Spans));
+    }
+
     /// <summary>A repeated export is one call, and only a cross-service client/server parent chain is a call.</summary>
     [TestMethod]
     public void CallsRequireACrossServiceClientParent()
@@ -64,7 +78,7 @@ public sealed class TraceTests
 
 internal static class TestSpan
 {
-    public const string TraceId = "00112233445566778899aabbccddeeff";
+    private const string TraceId = "00112233445566778899aabbccddeeff";
 
     public static SpanRecord Create(string service, string id, SpanKind kind = SpanKind.Internal,
         string? parent = null, string? store = null, string? server = null)
