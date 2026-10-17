@@ -1,5 +1,11 @@
 # Architecture tests with qyl
 
+**Archived successor notice:** the retained architecture fixtures, Orders/Payments
+applications and telemetry scenarios moved to
+[Qyl.Telemetry.Tests](https://github.com/ANcpLua/Qyl.Telemetry.Tests).
+Active development continues in its shared support, unit, integration and
+end-to-end projects. The documentation below describes this historical prototype.
+
 Orders and Payments run as separate .NET processes. Native MSTest architecture
 attributes choose the services and declare whether their stores should be independent
 or shared. Architecture checks inspect the spans the actual processes export.
