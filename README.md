@@ -19,9 +19,9 @@ public sealed class CheckoutTests
 
 This checkout uses .NET SDK 10.0.401, MSTest SDK 4.5.1, Microsoft.Testing.Platform
 2.5.1 and Microsoft coverage 18.12.0. Its dependency pins are qyl and
-`Qyl.Orchestration` 15.0.2, `Qyl.Telemetry.Hosting` 27.0.0,
-`Qyl.Api.Contracts` 14.0.1 and `Qyl.Telemetry.Testing` 3.0.2. The instrumentation
-stack supplies SemanticConventions 13.1.1 and OpenTelemetry SDK/exporter 1.20.0.
+`Qyl.Orchestration` 15.0.3, `Qyl.Telemetry.Hosting` 28.0.0,
+`Qyl.Api.Contracts` 14.0.1 and `Qyl.Telemetry.Testing` 3.0.3. The instrumentation
+stack supplies SemanticConventions 13.1.2 and OpenTelemetry SDK/exporter 1.20.0.
 Restore downloads the runtime for the SDK's OS and architecture; no sibling clone
 or private feed is needed.
 

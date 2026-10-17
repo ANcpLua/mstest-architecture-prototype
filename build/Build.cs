@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -70,7 +71,7 @@ sealed class Build : FalloutBuild
             [
                 "test", TestProject, "--min-line", "0", "--min-branch", "0", "--format", "json",
                 "--", "-c", _configuration.ToString(), "--no-build", "--no-restore",
-                "--minimum-expected-tests", _minimumExpectedTests.ToString(),
+                "--minimum-expected-tests", _minimumExpectedTests.ToString(CultureInfo.InvariantCulture),
                 "--report-trx", "--coverage-settings", RootDirectory / "coverage.config",
                 "--coverage-output", "coverage.cobertura.xml",
             ];
