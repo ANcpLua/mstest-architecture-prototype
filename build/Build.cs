@@ -24,7 +24,7 @@ sealed class Build : FalloutBuild
     readonly int _minimumExpectedTests = 73;
 
     [Solution(Name = "Solution")]
-    readonly Solution _solution;
+    readonly Solution _solution = null!;
 
     AbsolutePath TestResultsDirectory => RootDirectory / "TestResults";
     AbsolutePath TestProject => _solution.GetAllProjects("Checkout.Tests").Single().Path;
